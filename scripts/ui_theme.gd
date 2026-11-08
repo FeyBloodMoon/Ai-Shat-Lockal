@@ -37,6 +37,10 @@ static func build() -> Theme:
 	panel.content_margin_bottom = 2
 	t.set_stylebox("panel", "PanelContainer", panel)
 
+	# --- окно настройки модели (персонажа)
+	t.set_type_variation("DialogPanel", "PanelContainer")
+	t.set_stylebox("panel", "DialogPanel", _box(PANEL, 16, BORDER, 1))
+
 	# --- Пузыри сообщений
 	t.set_type_variation("UserBubble", "PanelContainer")
 	t.set_stylebox("panel", "UserBubble", _box(USER_BUBBLE, 14))
@@ -64,6 +68,27 @@ static func build() -> Theme:
 	t.set_color("font_color", "AccentButton", Color.WHITE)
 	t.set_color("font_hover_color", "AccentButton", Color.WHITE)
 	t.set_color("font_disabled_color", "AccentButton", Color(1, 1, 1, 0.45))
+
+	# --- кнопки темперамента: нажатая подсвечивается акцентом
+	t.set_type_variation("TraitButton", "Button")
+	t.set_stylebox("normal", "TraitButton", _box(PANEL_ALT, 8, BORDER, 1))
+	t.set_stylebox("hover", "TraitButton", _box(PANEL_ALT.lightened(0.08), 8, BORDER.lightened(0.12), 1))
+	t.set_stylebox("pressed", "TraitButton", _box(ACCENT.darkened(0.05), 8, ACCENT_HOVER, 1))
+	t.set_stylebox("hover_pressed", "TraitButton", _box(ACCENT, 8, ACCENT_HOVER, 1))
+	t.set_stylebox("disabled", "TraitButton", _box(PANEL_ALT.darkened(0.4), 8))
+	t.set_color("font_color", "TraitButton", DIM)
+	t.set_color("font_hover_color", "TraitButton", TEXT)
+	t.set_color("font_pressed_color", "TraitButton", Color.WHITE)
+	t.set_color("font_hover_pressed_color", "TraitButton", Color.WHITE)
+
+	# --- «Удалить»
+	t.set_type_variation("DangerButton", "Button")
+	t.set_stylebox("normal", "DangerButton", _box(Color("#3a1d22"), 8, ERROR, 1))
+	t.set_stylebox("hover", "DangerButton", _box(Color("#4a232a"), 8, ERROR, 1))
+	t.set_stylebox("pressed", "DangerButton", _box(Color("#2c1519"), 8, ERROR, 1))
+	t.set_color("font_color", "DangerButton", Color("#fca5a5"))
+	t.set_color("font_hover_color", "DangerButton", Color("#fecaca"))
+	t.set_color("font_pressed_color", "DangerButton", Color("#fca5a5"))
 
 	# --- поля ввода
 	t.set_stylebox("normal", "LineEdit", _box(Color("#0c1015"), 8, BORDER, 1))
@@ -105,7 +130,7 @@ static func build() -> Theme:
 	sep.color = BORDER
 	sep.thickness = 1
 	t.set_stylebox("separator", "HSeparator", sep)
-	t.set_constant("separation", "HSeparator", 12)
+	t.set_constant("separation", "HSeparator", 8)
 
 	# --- текст сообщений
 	t.set_color("default_color", "RichTextLabel", TEXT)

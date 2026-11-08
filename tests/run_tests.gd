@@ -7,6 +7,7 @@ extends SceneTree
 
 const ClientScript = preload("res://scripts/ollama_client.gd")
 const MarkdownHelper = preload("res://scripts/markdown.gd")
+const PersonaStoreScript = preload("res://scripts/personas.gd")
 
 const HOST := "http://127.0.0.1:11499"
 const DUMP := "/tmp/mock_last_request.json"
@@ -24,6 +25,7 @@ func _run() -> void:
 	await process_frame  # даём сцене войти в дерево, как в реальном приложении
 	print("=== тесты клиента Ollama ===")
 	_test_markdown()
+	_test_personas()
 	await _test_models()
 	await _test_connection()
 	await _test_stream_chat()
@@ -62,6 +64,75 @@ func _test_markdown() -> void:
 
 	var link := MarkdownHelper.to_bbcode("см. [доки](https://example.com)")
 	_check(link.contains("[url=https://example.com]"), "markdown: ссылка → url-bbcode")
+
+
+# ------------------------------------------------------------------ персонажи
+
+func _test_personas() -> void:
+	print("--- персонажи ---")
+	var file := "user://test_personas.json"
+	if FileAccess.file_exists(file):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(file))
+
+	var store = PersonaStoreScript.new()
+	store.file_path = file
+	store.load_all()
+	_check(store.count() == 0, "персонажи: старт с пустого списка")
+
+	var created: Dictionary = store.add("Бородач", "llama3.2:latest", ["friendly", "brief", "нет-такой"])
+	_check(not created.is_empty() and not str(created.get("id", "")).is_empty(), "персонажи: создан с id")
+	_check(created.get("traits", []) == ["friendly", "brief"],
+		"персонажи: неизвестные черты отброшены (%s)" % [created.get("traits", [])])
+	_check(store.count() == 1, "персонажи: в списке один")
+
+	var prompt: String = PersonaStoreScript.build_system_prompt(created)
+	_check(prompt.contains("Бородач"), "персонажи: в промпте есть имя")
+	_check(prompt.contains("llama3.2:latest"), "персонажи: в промпте есть основа")
+	_check(prompt.contains("дружелюбно"), "персонажи: в промпте черта «дружелюбный»")
+	_check(prompt.contains("коротко"), "персонажи: в промпте черта «коротко»")
+	_check(not prompt.contains("сарказм"), "персонажи: выключенные черты в промпт не попали")
+	_check(PersonaStoreScript.describe(created) == "Дружелюбный · Коротко",
+		"персонажи: подпись темперамента (%s)" % PersonaStoreScript.describe(created))
+
+	_check(store.add("", "llama3.2", []).is_empty(), "персонажи: пустое имя не создаётся")
+	store.clear()
+
+	var first: Dictionary = store.add("Бородач", "llama3.2:latest", ["friendly", "brief"])
+	_check(store.save() == OK, "персонажи: сохранение прошло")
+	_check(FileAccess.file_exists(file), "персонажи: файл появился")
+
+	var reloaded = PersonaStoreScript.new()
+	reloaded.file_path = file
+	reloaded.load_all()
+	_check(reloaded.count() == 1, "персонажи: прочитан один")
+	var restored: Dictionary = reloaded.get_by_id(str(first.get("id", "")))
+	_check(str(restored.get("name", "")) == "Бородач", "персонажи: имя пережило запись")
+	_check(str(restored.get("base_model", "")) == "llama3.2:latest", "персонажи: основа пережила запись")
+	_check(restored.get("traits", []) == ["friendly", "brief"], "персонажи: темперамент пережил запись")
+
+	_check(reloaded.update_persona(str(first.get("id", "")), "Старина", "qwen2.5-coder:7b",
+		["sarcastic"]), "персонажи: правка прошла")
+	var edited: Dictionary = reloaded.get_by_id(str(first.get("id", "")))
+	_check(str(edited.get("name", "")) == "Старина", "персонажи: новое имя на месте")
+	_check(str(edited.get("base_model", "")) == "qwen2.5-coder:7b", "персонажи: новая основа на месте")
+	_check(edited.get("traits", []) == ["sarcastic"], "персонажи: темперамент заменён")
+	_check(not reloaded.update_persona("нет-такого", "Кто-то", "llama3.2"),
+		"персонажи: правка несуществующего — false")
+	_check(str(reloaded.find_by_name("старина").get("name", "")) == "Старина",
+		"персонажи: поиск имени без учёта регистра")
+
+	_check(reloaded.remove_persona(str(first.get("id", ""))), "персонажи: удаление прошло")
+	_check(reloaded.count() == 0, "персонажи: после удаления пусто")
+
+	# битый файл не должен ронять приложение
+	var broken := FileAccess.open(file, FileAccess.WRITE)
+	broken.store_string("{это совсем не json")
+	broken.close()
+	var tolerant = PersonaStoreScript.new()
+	tolerant.file_path = file
+	tolerant.load_all()
+	_check(tolerant.count() == 0, "персонажи: битый файл читается без падения")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(file))
 
 
 # ------------------------------------------------------------------ клиент
