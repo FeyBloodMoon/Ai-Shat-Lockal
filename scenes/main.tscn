@@ -78,10 +78,32 @@ theme_override_colors/font_color = Color(0.984314, 0.74902, 0.141176, 1)
 theme_override_font_sizes/font_size = 13
 text = "подключение…"
 
-[node name="RefreshBtn" type="Button" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+[node name="ChatsHeader" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+layout_mode = 2
+theme_type_variation = &"SectionLabel"
+text = "ПЕРЕПИСКИ"
+
+[node name="ChatList" type="ItemList" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 88)
+layout_mode = 2
+
+[node name="ChatButtons" type="HBoxContainer" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="NewChatBtn" type="Button" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox/ChatButtons"]
 unique_name_in_owner = true
 layout_mode = 2
-text = "Обновить список моделей"
+size_flags_horizontal = 3
+text = "+ Диалог"
+
+[node name="DeleteChatBtn" type="Button" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox/ChatButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+disabled = true
+text = "Удалить"
 
 [node name="PersonasHeader" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 layout_mode = 2
@@ -90,7 +112,7 @@ text = "МОИ МОДЕЛИ"
 
 [node name="PersonaList" type="ItemList" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 88)
+custom_minimum_size = Vector2(0, 68)
 layout_mode = 2
 
 [node name="PersonaButtons" type="HBoxContainer" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
@@ -115,23 +137,22 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.545098, 0.592157, 0.658824, 1)
 theme_override_font_sizes/font_size = 11
-text = "Модель настраивается один раз: имя, основа и темперамент."
+text = "Имя, основа, темперамент."
 autowrap_mode = 3
-
-[node name="Sep1" type="HSeparator" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
-layout_mode = 2
 
 [node name="ModelsHeader" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 layout_mode = 2
 theme_type_variation = &"SectionLabel"
 text = "БАЗОВЫЕ МОДЕЛИ"
 
+[node name="RefreshBtn" type="Button" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Обновить список моделей"
+
 [node name="ModelList" type="ItemList" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 80)
-layout_mode = 2
-
-[node name="Sep2" type="HSeparator" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+custom_minimum_size = Vector2(0, 68)
 layout_mode = 2
 
 [node name="SettingsHeader" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
@@ -188,14 +209,6 @@ unique_name_in_owner = true
 layout_mode = 2
 button_pressed = true
 text = "Потоковый ответ"
-
-[node name="Sep3" type="HSeparator" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
-layout_mode = 2
-
-[node name="NewChatBtn" type="Button" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Новый диалог"
 
 [node name="ChatColumn" type="VBoxContainer" parent="Layout"]
 layout_mode = 2

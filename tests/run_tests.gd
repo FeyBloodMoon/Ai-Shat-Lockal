@@ -8,6 +8,7 @@ extends SceneTree
 const ClientScript = preload("res://scripts/ollama_client.gd")
 const MarkdownHelper = preload("res://scripts/markdown.gd")
 const PersonaStoreScript = preload("res://scripts/personas.gd")
+const ChatStoreScript = preload("res://scripts/chat_store.gd")
 
 const HOST := "http://127.0.0.1:11499"
 const DUMP := "/tmp/mock_last_request.json"
@@ -26,6 +27,7 @@ func _run() -> void:
 	print("=== тесты клиента Ollama ===")
 	_test_markdown()
 	_test_personas()
+	_test_chats()
 	await _test_models()
 	await _test_connection()
 	await _test_stream_chat()
@@ -133,6 +135,107 @@ func _test_personas() -> void:
 	tolerant.load_all()
 	_check(tolerant.count() == 0, "персонажи: битый файл читается без падения")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(file))
+
+
+# ------------------------------------------------------------------ переписки
+
+func _test_chats() -> void:
+	print("--- переписки ---")
+	var dir := "user://test_chats"
+	_remove_tree(dir)
+
+	var store = ChatStoreScript.new()
+	store.dir_path = dir
+	store.load_all()
+	_check(store.count() == 0, "переписки: старт с пустой папки")
+	_check(ChatStoreScript.make_title([]) == "Без названия",
+		"переписки: заголовок по умолчанию")
+	_check(ChatStoreScript.make_title([{"role": "user", "content": "Первая строка\nвторая"}])
+		== "Первая строка", "переписки: заголовок — первая строка")
+
+	var first: Dictionary = store.new_chat("", "", "llama3.2:latest", 900.0)
+	first["messages"] = [
+		{"role": "user", "content":
+			"Привет! Расскажи что-нибудь очень интересное про далёкий космос и планеты"},
+		{"role": "assistant", "content": "Конечно, держись", "speaker": "Бородач"},
+	]
+	var saved_a: Dictionary = store.save_chat(first, 1000.0)
+	_check(not saved_a.is_empty(), "переписки: сохранение прошло")
+	_check(store.count() == 1, "переписки: одна в списке")
+	var title := str(saved_a.get("title", ""))
+	_check(title.length() <= 43 and title.ends_with("…"),
+		"переписки: длинный заголовок обрезан (%s)" % title)
+	_check(int(saved_a.get("created_at", 0)) == 900 and int(saved_a.get("updated_at", 0)) == 1000,
+		"переписки: время создания и обновления")
+	_check(FileAccess.file_exists(dir.path_join(str(saved_a.get("id", "")) + ".json")),
+		"переписки: файл появился на диске")
+
+	var second: Dictionary = store.new_chat("p_1", "Бородач", "qwen2.5-coder:7b")
+	second["messages"] = [
+		{"role": "user", "content": "вторая переписка"},
+		{"role": "assistant", "content": "ок", "speaker": "Бородач"},
+	]
+	var saved_b: Dictionary = store.save_chat(second, 2000.0)
+	_check(store.count() == 2, "переписки: две в списке")
+	_check(str(store.items[0].get("id", "")) == str(saved_b.get("id", "")),
+		"переписки: свежие сверху")
+
+	var again: Dictionary = saved_a.duplicate(true)
+	again["messages"].append({"role": "assistant", "content": "добавлено", "speaker": ""})
+	var saved_a2: Dictionary = store.save_chat(again, 3000.0)
+	_check(str(saved_a2.get("title", "")) == title, "переписки: заголовок не перезаписывается")
+	_check(str(store.items[0].get("id", "")) == str(saved_a.get("id", "")),
+		"переписки: обновлённая переписка поднялась наверх")
+	_check(int(saved_a2.get("created_at", 0)) == 900, "переписки: время создания не теряется")
+	_check(int(saved_a2.get("updated_at", 0)) == 3000, "переписки: время обновления свежее")
+
+	var reloaded = ChatStoreScript.new()
+	reloaded.dir_path = dir
+	reloaded.load_all()
+	_check(reloaded.count() == 2, "переписки: после перезапуска две")
+	var restored: Dictionary = reloaded.get_by_id(str(saved_a.get("id", "")))
+	_check(restored.get("messages", []).size() == 3, "переписки: сообщения пережили запись")
+	_check(str(restored.get("model", "")) == "llama3.2:latest", "переписки: модель сохранена")
+	var restored_b: Dictionary = reloaded.get_by_id(str(saved_b.get("id", "")))
+	_check(str(restored_b.get("persona_name", "")) == "Бородач", "переписки: персонаж сохранён")
+	_check(restored_b.get("messages", [])[1].get("speaker", "") == "Бородач",
+		"переписки: подпись говорящего сохранена")
+
+	_check(reloaded.delete_chat(str(saved_b.get("id", ""))), "переписки: удаление прошло")
+	_check(reloaded.count() == 1, "переписки: после удаления одна")
+	_check(not FileAccess.file_exists(dir.path_join(str(saved_b.get("id", "")) + ".json")),
+		"переписки: файл удалён")
+	_check(not reloaded.delete_chat("нет-такой"), "переписки: удаление несуществующей — false")
+
+	var broken := FileAccess.open(dir.path_join("broken.json"), FileAccess.WRITE)
+	broken.store_string("{это не json")
+	broken.close()
+	var tolerant = ChatStoreScript.new()
+	tolerant.dir_path = dir
+	tolerant.load_all()
+	_check(tolerant.count() == 1, "переписки: битый файл пропущен")
+
+	var now := 1_700_000_000
+	_check(ChatStoreScript.format_when(now, now) == "только что", "переписки: время — только что")
+	_check(ChatStoreScript.format_when(now - 120, now) == "2 мин назад",
+		"переписки: время — минуты")
+	_check(ChatStoreScript.format_when(now - 7200, now) == "2 ч назад", "переписки: время — часы")
+	_check(ChatStoreScript.format_when(now - 90000, now) == "вчера", "переписки: время — вчера")
+	_check(ChatStoreScript.format_when(now - 30 * 86400, now).contains("."),
+		"переписки: старая переписка — дата")
+
+	_remove_tree(dir)
+
+
+func _remove_tree(path: String) -> void:
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	for file_name in dir.get_files():
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path.path_join(file_name)))
+	for directory in dir.get_directories():
+		_remove_tree(path.path_join(directory))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 
 # ------------------------------------------------------------------ клиент

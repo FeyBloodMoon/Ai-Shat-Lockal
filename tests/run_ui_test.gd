@@ -9,6 +9,7 @@ extends SceneTree
 const MAIN_SCENE := "res://scenes/main.tscn"
 const MOCK_HOST := "http://127.0.0.1:11499"
 const USER_FILES := ["user://personas.json", "user://ollama_chat.cfg"]
+const USER_DIRECTORIES := ["user://chats"]
 const EXPECTED_REPLY := "Привет! Это **тестовый** ответ от мок-сервера.\n\nСписок:\n- первый пункт\n- второй пункт\n\n```gdscript\nprint(\"hello\")\n```\n\nГотово."
 
 var passed := 0
@@ -79,6 +80,7 @@ func _run() -> void:
 	_check(ui.history.is_empty(), "новый диалог: история очищена")
 
 	await _test_personas(ui, input, model_list)
+	await _test_chats(ui, input)
 
 	# --- пример встраивания чата как игрового меню (Esc)
 	var overlay := CanvasLayer.new()
@@ -111,6 +113,12 @@ func _isolate_user_files() -> void:
 		if FileAccess.file_exists(path):
 			DirAccess.rename_absolute(ProjectSettings.globalize_path(path),
 				ProjectSettings.globalize_path(backup))
+	for path in USER_DIRECTORIES:
+		var backup: String = str(path) + ".uitest"
+		_remove_tree(backup)
+		if DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(path)):
+			DirAccess.rename_absolute(ProjectSettings.globalize_path(path),
+				ProjectSettings.globalize_path(backup))
 
 
 func _restore_user_files() -> void:
@@ -121,6 +129,116 @@ func _restore_user_files() -> void:
 		if FileAccess.file_exists(backup):
 			DirAccess.rename_absolute(ProjectSettings.globalize_path(backup),
 				ProjectSettings.globalize_path(path))
+	for path in USER_DIRECTORIES:
+		var backup: String = str(path) + ".uitest"
+		_remove_tree(path)
+		if DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(backup)):
+			DirAccess.rename_absolute(ProjectSettings.globalize_path(backup),
+				ProjectSettings.globalize_path(path))
+
+
+func _remove_tree(path: String) -> void:
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	for file_name in dir.get_files():
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path.path_join(file_name)))
+	for directory in dir.get_directories():
+		_remove_tree(path.path_join(directory))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+## Сохранение переписок: автосохранение, список, переключение, удаление, перезапуск.
+func _test_chats(ui: Control, input: TextEdit) -> void:
+	# предыдущие сценарии уже насохраняли переписок — начинаем с чистого листа
+	_remove_tree("user://chats")
+	ui.chats.clear()
+	ui.chats.load_all()
+	ui._new_chat(true)
+	await process_frame
+
+	var chat_list: ItemList = ui.get_node("%ChatList")
+	var delete_btn: Button = ui.get_node("%DeleteChatBtn")
+	var bubbles: VBoxContainer = ui.get_node("%Messages")
+	_check(chat_list.item_count == 1 and chat_list.is_item_disabled(0),
+		"переписки: пустой список показывает подсказку")
+
+	var first_text := "первая переписка про далёкий космос"
+	input.text = first_text
+	ui._send()
+	await _wait_until(func() -> bool: return not ui._busy, 15.0)
+	await process_frame
+	_check(ui.chats.count() == 1, "переписки: диалог сохранился (%d)" % ui.chats.count())
+	_check(not ui._current_chat_id.is_empty(), "переписки: у диалога есть id")
+	_check(chat_list.item_count == 1, "переписки: строка появилась в списке")
+	_check(chat_list.get_item_text(0).contains("первая переписка"),
+		"переписки: заголовок из первого сообщения (%s)" % chat_list.get_item_text(0))
+	_check(not delete_btn.disabled, "переписки: удаление доступно")
+	var first_chat_id: String = str(ui._current_chat_id)
+	var saved: Dictionary = ui.chats.get_by_id(first_chat_id)
+	_check(saved.get("messages", []).size() == 2,
+		"переписки: в файле оба сообщения (%d)" % saved.get("messages", []).size())
+	_check(FileAccess.file_exists("user://chats".path_join(first_chat_id + ".json")),
+		"переписки: файл лежит на диске")
+
+	# новый диалог не плодит пустые переписки
+	ui._new_chat(true)
+	await process_frame
+	_check(ui.chats.count() == 1, "переписки: «+ Диалог» не создаёт пустую переписку")
+	_check(ui._current_chat_id.is_empty(), "переписки: новый диалог без id")
+	_check(ui.history.is_empty(), "переписки: новый диалог пуст")
+	_check(delete_btn.disabled, "переписки: в новом диалоге удалять нечего")
+
+	input.text = "вторая переписка про море"
+	ui._send()
+	await _wait_until(func() -> bool: return not ui._busy, 15.0)
+	await process_frame
+	_check(ui.chats.count() == 2, "переписки: две после второго диалога")
+	_check(chat_list.item_count == 2, "переписки: две строки в списке")
+	_check(chat_list.get_item_text(0).contains("вторая переписка"),
+		"переписки: свежая переписка сверху")
+
+	# возвращаемся к первой — сообщения восстанавливаются
+	ui._open_chat(first_chat_id)
+	await process_frame
+	await process_frame
+	_check(ui.history.size() == 2, "переписки: история восстановлена (%d)" % ui.history.size())
+	_check(str(ui.history[0].get("content", "")) == first_text,
+		"переписки: текст первого сообщения на месте")
+	_check(bubbles.get_child_count() == 2,
+		"переписки: пузыри восстановлены (%d)" % bubbles.get_child_count())
+	_check(ui._current_chat_id == first_chat_id, "переписки: открыта нужная переписка")
+	_check(not delete_btn.disabled, "переписки: удаление снова доступно")
+
+	# удаление — в два нажатия
+	delete_btn.pressed.emit()
+	_check(ui.chats.count() == 2 and delete_btn.text == "Точно?",
+		"переписки: первое нажатие только спрашивает")
+	delete_btn.pressed.emit()
+	await process_frame
+	_check(ui.chats.count() == 1, "переписки: переписка удалена")
+	_check(ui._current_chat_id.is_empty(), "переписки: открыт новый диалог")
+	_check(ui.history.is_empty(), "переписки: история очищена")
+	_check(bubbles.get_child_count() == 1, "переписки: остался только приветственный пузырь")
+	_check(delete_btn.text == "Удалить", "переписки: кнопка удаления сброшена")
+
+	# перезапуск: последняя переписка открывается сама
+	ui.queue_free()
+	await process_frame
+	await process_frame
+	var again: Control = load(MAIN_SCENE).instantiate()
+	root.add_child(again)
+	await process_frame
+	var models_ready: bool = await _wait_until(func() -> bool:
+		return again.get_node("%ModelList").item_count == 2, 10.0)
+	_check(models_ready, "перезапуск: модели подтянулись")
+	await process_frame
+	_check(again.chats.count() == 1, "перезапуск: переписка найдена (%d)" % again.chats.count())
+	_check(again.history.size() == 2, "перезапуск: история восстановлена (%d)" % again.history.size())
+	_check(again.get_node("%Messages").get_child_count() == 2,
+		"перезапуск: пузыри восстановлены (%d)" % again.get_node("%Messages").get_child_count())
+	_check(again.get_node("%ChatList").item_count == 1, "перезапуск: строка в списке")
+	_check(not again._current_chat_id.is_empty(), "перезапуск: переписка выбрана")
 
 
 func _option_index(option: OptionButton, text: String) -> int:
