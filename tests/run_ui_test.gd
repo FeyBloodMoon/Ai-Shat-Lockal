@@ -8,6 +8,7 @@ extends SceneTree
 
 const MAIN_SCENE := "res://scenes/main.tscn"
 const MOCK_HOST := "http://127.0.0.1:11499"
+const USER_FILES := ["user://personas.json", "user://ollama_chat.cfg"]
 const EXPECTED_REPLY := "Привет! Это **тестовый** ответ от мок-сервера.\n\nСписок:\n- первый пункт\n- второй пункт\n\n```gdscript\nprint(\"hello\")\n```\n\nГотово."
 
 var passed := 0
@@ -22,6 +23,7 @@ func _initialize() -> void:
 func _run() -> void:
 	await process_frame
 	print("=== тесты интерфейса ===")
+	_isolate_user_files()
 
 	ui = load(MAIN_SCENE).instantiate()
 	root.add_child(ui)
@@ -76,6 +78,8 @@ func _run() -> void:
 	_check(messages.get_child_count() == 1, "новый диалог: остался только приветственный пузырь")
 	_check(ui.history.is_empty(), "новый диалог: история очищена")
 
+	await _test_personas(ui, input, model_list)
+
 	# --- пример встраивания чата как игрового меню (Esc)
 	var overlay := CanvasLayer.new()
 	overlay.set_script(load("res://examples/chat_overlay.gd"))
@@ -92,8 +96,180 @@ func _run() -> void:
 	await process_frame
 	_check(not overlay._chat.visible, "оверлей: Esc закрывает чат")
 
+	_restore_user_files()
 	print("\nИтого: %d ок, %d провалено" % [passed, failed])
 	quit(0 if failed == 0 else 1)
+
+
+## Тесты работают в чистом профиле: рабочие настройки и персонажи временно
+## откладываются в *.uitest и возвращаются на место в конце.
+func _isolate_user_files() -> void:
+	for path in USER_FILES:
+		var backup: String = str(path) + ".uitest"
+		if FileAccess.file_exists(backup):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(backup))
+		if FileAccess.file_exists(path):
+			DirAccess.rename_absolute(ProjectSettings.globalize_path(path),
+				ProjectSettings.globalize_path(backup))
+
+
+func _restore_user_files() -> void:
+	for path in USER_FILES:
+		var backup: String = str(path) + ".uitest"
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+		if FileAccess.file_exists(backup):
+			DirAccess.rename_absolute(ProjectSettings.globalize_path(backup),
+				ProjectSettings.globalize_path(path))
+
+
+func _option_index(option: OptionButton, text: String) -> int:
+	for i in option.item_count:
+		if option.get_item_text(i) == text:
+			return i
+	return -1
+
+
+## Создание, правка, использование в чате и удаление «своей модели».
+func _test_personas(ui: Control, input: TextEdit, model_list: ItemList) -> void:
+	var persona_list: ItemList = ui.get_node("%PersonaList")
+	var editor = ui._persona_editor
+
+	# --- форма открывается по кнопке «+ Создать»
+	ui.get_node("%CreatePersonaBtn").pressed.emit()
+	await process_frame
+	_check(editor.visible, "редактор: форма создания открылась")
+	_check(editor.title_text() == "Новая модель", "редактор: заголовок создания")
+	_check(editor.base_option.item_count == model_list.item_count,
+		"редактор: в «основе» все установленные модели (%d)" % editor.base_option.item_count)
+	_check(editor.preview_label.text.contains("Особых требований"),
+		"редактор: без темперамента промпт нейтральный")
+
+	# --- пустое имя не сохраняется
+	editor.save_btn.pressed.emit()
+	await process_frame
+	_check(editor.visible and editor.error_label.visible, "редактор: без имени не сохраняет")
+
+	# --- имя + основа + темперамент
+	editor.name_edit.text = "Бородач"
+	var base_index := _option_index(editor.base_option, "qwen2.5-coder:7b")
+	editor.base_option.select(base_index)
+	editor.base_option.item_selected.emit(base_index)
+	editor.trait_buttons["friendly"].button_pressed = true
+	editor.trait_buttons["brief"].button_pressed = true
+	_check(editor.preview_label.text.contains("Бородач"), "редактор: предпросмотр знает имя")
+	_check(editor.preview_label.text.contains("дружелюбно"), "редактор: предпросмотр знает темперамент")
+
+	# --- тон — взаимоисключающие кнопки
+	editor.trait_buttons["sarcastic"].button_pressed = true
+	_check(not editor.trait_buttons["friendly"].button_pressed,
+		"редактор: «Сарказм» отпустил «Дружелюбный»")
+	editor.trait_buttons["friendly"].button_pressed = true
+
+	editor.save_btn.pressed.emit()
+	await process_frame
+	_check(not editor.visible, "редактор: закрылся после сохранения")
+	_check(ui.personas.count() == 1, "персонажи: сохранено 1 (%d)" % ui.personas.count())
+	_check(persona_list.item_count == 2, "персонажи: «без персонажа» + своя модель")
+	_check(persona_list.get_item_text(1).contains("Бородач"), "персонажи: имя в списке")
+	_check(ui.get_node("%ModelBadge").text.contains("Бородач"),
+		"персонажи: бейдж показывает персонажа (%s)" % ui.get_node("%ModelBadge").text)
+	_check(ui.get_node("%PersonaHint").text.contains("Дружелюбный"),
+		"персонажи: подпись показывает темперамент")
+	_check(ui.client.model == "qwen2.5-coder:7b", "персонажи: клиент переключён на основу")
+
+	# --- чат идёт на основу персонажа с собранным промптом
+	var persona_name := str(ui.personas.items[0].get("name", ""))
+	var persona_id := str(ui.personas.items[0].get("id", ""))
+	input.text = "привет"
+	ui._send()
+	await _wait_until(func() -> bool: return not ui._busy, 15.0)
+	var dump := _read_dump()
+	_check(str(dump.get("model", "")) == "qwen2.5-coder:7b",
+		"персонажи: запрос ушёл на основу (%s)" % dump.get("model", ""))
+	var sent: Array = dump.get("messages", [])
+	_check(sent.size() == 2, "персонажи: system + user (%d)" % sent.size())
+	if sent.size() == 2:
+		_check(sent[0].get("role", "") == "system", "персонажи: первым идёт system")
+		var system_text := str(sent[0].get("content", ""))
+		_check(system_text.contains(persona_name), "персонажи: в промпте имя")
+		_check(system_text.contains("дружелюбно"), "персонажи: в промпте темперамент")
+
+	# --- правка: меняем темперамент, второй персонаж не появляется
+	ui._open_persona_editor(persona_id)
+	await process_frame
+	_check(editor.name_edit.text == persona_name, "редактор: имя подставилось")
+	_check(editor.trait_buttons["friendly"].button_pressed, "редактор: кнопки вернулись нажатыми")
+	_check(editor.delete_btn.visible, "редактор: «Удалить» видна при правке")
+	editor.trait_buttons["friendly"].button_pressed = false
+	editor.trait_buttons["sarcastic"].button_pressed = true
+	editor.save_btn.pressed.emit()
+	await process_frame
+	_check(ui.personas.count() == 1, "редактор: правка не создала второго")
+	_check(ui.personas.items[0].get("traits", []) == ["sarcastic", "brief"],
+		"редактор: темперамент обновлён (%s)" % [ui.personas.items[0].get("traits", [])])
+
+	# --- переключение «персонаж ↔ без персонажа»
+	persona_list.select(0)
+	persona_list.item_selected.emit(0)
+	await process_frame
+	_check(ui._selected_persona_id.is_empty(), "персонажи: переключение в обычный режим")
+	_check(ui.client.model == "qwen2.5-coder:7b",
+		"персонажи: в обычном режиме отвечает выбранная базовая модель (%s)" % ui.client.model)
+	persona_list.select(1)
+	persona_list.item_selected.emit(1)
+	await process_frame
+	_check(ui._selected_persona_id == persona_id, "персонажи: возврат к своему персонажу")
+
+	# --- клик по базовой модели меняет основу персонажа
+	var llama_index := 0
+	for i in model_list.item_count:
+		if model_list.get_item_text(i) == "llama3.2:latest":
+			llama_index = i
+	model_list.select(llama_index)
+	model_list.item_selected.emit(llama_index)
+	await process_frame
+	_check(ui.personas.items[0].get("base_model", "") == "llama3.2:latest",
+		"персонажи: основа меняется кликом по списку моделей")
+	_check(ui.get_node("%ModelBadge").text.contains("llama3.2"), "персонажи: бейдж обновился")
+
+	# --- одинаковые имена запрещены
+	ui._open_persona_editor("")
+	await process_frame
+	editor.name_edit.text = persona_name
+	editor.save_btn.pressed.emit()
+	await process_frame
+	_check(editor.visible and editor.error_label.text.contains("уже есть"),
+		"редактор: одинаковые имена запрещены")
+	editor.cancel_btn.pressed.emit()
+	await process_frame
+	_check(not editor.visible, "редактор: «Отмена» закрывает")
+
+	# --- Esc закрывает без сохранения
+	ui._open_persona_editor("")
+	await process_frame
+	var esc := InputEventKey.new()
+	esc.keycode = KEY_ESCAPE
+	esc.pressed = true
+	editor._input(esc)
+	await process_frame
+	_check(not editor.visible, "редактор: Esc закрывает")
+
+	# --- удаление в два нажатия
+	ui._open_persona_editor(persona_id)
+	await process_frame
+	editor.delete_btn.pressed.emit()
+	_check(editor.visible, "удаление: первое нажатие только спрашивает")
+	editor.delete_btn.pressed.emit()
+	await process_frame
+	_check(ui.personas.count() == 0, "удаление: персонаж удалён")
+	_check(ui._selected_persona_id.is_empty(), "удаление: выбор сброшен")
+	_check(persona_list.item_count == 1, "удаление: остался только обычный режим")
+	_check(ui.client.model == "llama3.2:latest",
+		"удаление: клиент остался на подсвеченной модели (%s)" % ui.client.model)
+
+	ui._new_chat(true)
+	await process_frame
 
 
 func _read_dump() -> Dictionary:

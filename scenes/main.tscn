@@ -34,37 +34,43 @@ grow_vertical = 2
 theme_override_constants/separation = 12
 
 [node name="Sidebar" type="PanelContainer" parent="Layout"]
-custom_minimum_size = Vector2(280, 0)
+custom_minimum_size = Vector2(292, 0)
 layout_mode = 2
 
 [node name="SidebarMargin" type="MarginContainer" parent="Layout/Sidebar"]
 layout_mode = 2
 theme_override_constants/margin_left = 14
 theme_override_constants/margin_top = 14
-theme_override_constants/margin_right = 14
+theme_override_constants/margin_right = 10
 theme_override_constants/margin_bottom = 14
 
-[node name="SidebarBox" type="VBoxContainer" parent="Layout/Sidebar/SidebarMargin"]
+[node name="SidebarScroll" type="ScrollContainer" parent="Layout/Sidebar/SidebarMargin"]
 layout_mode = 2
-theme_override_constants/separation = 8
+follow_focus = true
+horizontal_scroll_mode = 0
 
-[node name="AppTitle" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+[node name="SidebarBox" type="VBoxContainer" parent="Layout/Sidebar/SidebarMargin/SidebarScroll"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 20
+size_flags_horizontal = 3
+theme_override_constants/separation = 6
+
+[node name="AppTitle" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
 text = "Ollama Chat"
 
-[node name="StatusRow" type="HBoxContainer" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+[node name="StatusRow" type="HBoxContainer" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="StatusDot" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox/StatusRow"]
+[node name="StatusDot" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox/StatusRow"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.984314, 0.74902, 0.141176, 1)
 theme_override_font_sizes/font_size = 13
 text = "●"
 
-[node name="StatusLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox/StatusRow"]
+[node name="StatusLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox/StatusRow"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -72,84 +78,121 @@ theme_override_colors/font_color = Color(0.984314, 0.74902, 0.141176, 1)
 theme_override_font_sizes/font_size = 13
 text = "подключение…"
 
-[node name="RefreshBtn" type="Button" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+[node name="RefreshBtn" type="Button" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Обновить список моделей"
 
-[node name="ModelsHeader" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+[node name="PersonasHeader" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 layout_mode = 2
 theme_type_variation = &"SectionLabel"
-text = "МОДЕЛИ"
+text = "МОИ МОДЕЛИ"
 
-[node name="ModelList" type="ItemList" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+[node name="PersonaList" type="ItemList" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 120)
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="Sep1" type="HSeparator" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+custom_minimum_size = Vector2(0, 88)
 layout_mode = 2
 
-[node name="SettingsHeader" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+[node name="PersonaButtons" type="HBoxContainer" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="CreatePersonaBtn" type="Button" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox/PersonaButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "+ Создать"
+
+[node name="EditPersonaBtn" type="Button" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox/PersonaButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+disabled = true
+text = "Настроить"
+
+[node name="PersonaHint" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.545098, 0.592157, 0.658824, 1)
+theme_override_font_sizes/font_size = 11
+text = "Модель настраивается один раз: имя, основа и темперамент."
+autowrap_mode = 3
+
+[node name="Sep1" type="HSeparator" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+layout_mode = 2
+
+[node name="ModelsHeader" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+layout_mode = 2
+theme_type_variation = &"SectionLabel"
+text = "БАЗОВЫЕ МОДЕЛИ"
+
+[node name="ModelList" type="ItemList" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 80)
+layout_mode = 2
+
+[node name="Sep2" type="HSeparator" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+layout_mode = 2
+
+[node name="SettingsHeader" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 layout_mode = 2
 theme_type_variation = &"SectionLabel"
 text = "НАСТРОЙКИ"
 
-[node name="HostLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+[node name="HostLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 layout_mode = 2
 theme_type_variation = &"DimLabel"
 text = "Адрес сервера Ollama"
 
-[node name="HostEdit" type="LineEdit" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+[node name="HostEdit" type="LineEdit" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "http://localhost:11434"
 
-[node name="SysLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+[node name="SysLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 layout_mode = 2
 theme_type_variation = &"DimLabel"
-text = "Системный промпт"
+text = "Системный промпт (дополнительно)"
 
-[node name="SystemPromptEdit" type="TextEdit" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+[node name="SystemPromptEdit" type="TextEdit" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 62)
+custom_minimum_size = Vector2(0, 56)
 layout_mode = 2
 placeholder_text = "Например: отвечай коротко и по-русски"
 wrap_mode = 1
 
-[node name="TempRow" type="HBoxContainer" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+[node name="TempRow" type="HBoxContainer" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 layout_mode = 2
 
-[node name="TempLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox/TempRow"]
+[node name="TempLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox/TempRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_type_variation = &"DimLabel"
 text = "Температура"
 
-[node name="TempValue" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox/TempRow"]
+[node name="TempValue" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox/TempRow"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"DimLabel"
 text = "0.80"
 
-[node name="TempSlider" type="HSlider" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+[node name="TempSlider" type="HSlider" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 unique_name_in_owner = true
 layout_mode = 2
 max_value = 2.0
 step = 0.05
 value = 0.8
 
-[node name="StreamCheck" type="CheckBox" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+[node name="StreamCheck" type="CheckBox" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 unique_name_in_owner = true
 layout_mode = 2
 button_pressed = true
 text = "Потоковый ответ"
 
-[node name="Sep2" type="HSeparator" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+[node name="Sep3" type="HSeparator" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 layout_mode = 2
 
-[node name="NewChatBtn" type="Button" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+[node name="NewChatBtn" type="Button" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Новый диалог"
@@ -173,6 +216,7 @@ theme_override_constants/margin_bottom = 8
 layout_mode = 2
 
 [node name="ChatTitle" type="Label" parent="Layout/ChatColumn/Header/HeaderMargin/HeaderBox"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 16
