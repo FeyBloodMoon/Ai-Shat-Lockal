@@ -1,7 +1,11 @@
 extends Control
-## Главный экран чата: связывает интерфейс, OllamaClient и «персонажей».
+## Главный экран чата: связывает интерфейс, OllamaClient, переписки и персонажей.
 ##
-## Персонаж (он же «своя модель») — это сохранённая настройка уже установленной
+## Переписка — это сохранённый диалог (user://chats/<id>.json): заголовок,
+## персонаж, модель и сообщения. Она пишется на диск после каждого ответа
+## модели, а при запуске открывается последняя.
+##
+## Персонаж (он же «своя модель») — сохранённая настройка уже установленной
 ## модели: имя, основа (какая модель Ollama отвечает) и темперамент. Из имени и
 ## темперамента собирается системный промпт, он уходит на сервер вместе с чатом.
 
@@ -10,6 +14,7 @@ const ChatBubbleScript = preload("res://scripts/chat_bubble.gd")
 const UiThemeScript = preload("res://scripts/ui_theme.gd")
 const PersonaStoreScript = preload("res://scripts/personas.gd")
 const PersonaEditorScript = preload("res://scripts/persona_editor.gd")
+const ChatStoreScript = preload("res://scripts/chat_store.gd")
 
 const SETTINGS_PATH := "user://ollama_chat.cfg"
 ## Сколько последних сообщений отправлять модели (чтобы не раздувать контекст).
@@ -17,6 +22,9 @@ const MAX_HISTORY_MESSAGES := 40
 const HINT_TEXT := "Enter — отправить · Shift+Enter — новая строка · Ctrl+Enter — тоже отправить"
 const PLAIN_MODE_HINT := "Модель настраивается один раз: имя, основа и темперамент."
 
+@onready var _chat_list: ItemList = %ChatList
+@onready var _new_chat_btn: Button = %NewChatBtn
+@onready var _delete_chat_btn: Button = %DeleteChatBtn
 @onready var _persona_list: ItemList = %PersonaList
 @onready var _create_persona_btn: Button = %CreatePersonaBtn
 @onready var _edit_persona_btn: Button = %EditPersonaBtn
@@ -39,10 +47,16 @@ const PLAIN_MODE_HINT := "Модель настраивается один ра�
 
 var client: OllamaClientScript
 var personas: PersonaStoreScript
+var chats: ChatStoreScript
 var history: Array = []
 var _persona_editor: PersonaEditorScript
 ## id выбранного персонажа; пустая строка — обычный режим без персонажа.
 var _selected_persona_id: String = ""
+## id открытой переписки; пустая строка — новый диалог, ещё не сохранённый.
+var _current_chat_id: String = ""
+var _delete_chat_armed: bool = false
+## Есть ли в текущей переписке несохранённые изменения.
+var _chat_dirty: bool = false
 var _models: Array = []
 var _assistant_bubble: ChatBubbleScript = null
 var _busy: bool = false
@@ -67,17 +81,20 @@ func _ready() -> void:
 
 	_wire_events()
 	_setup_personas()
+	_setup_chats()
 	_load_settings()
 	_restore_persona()
 	_set_busy(false)
-	_new_chat(true)
+	_restore_chat()
 	_input.grab_focus()
 	_check_connection()
 
 
 func _wire_events() -> void:
 	%RefreshBtn.pressed.connect(_refresh_models)
-	%NewChatBtn.pressed.connect(func() -> void: _new_chat(true))
+	_new_chat_btn.pressed.connect(func() -> void: _new_chat(true))
+	_delete_chat_btn.pressed.connect(_on_delete_chat_pressed)
+	_chat_list.item_selected.connect(_on_chat_selected)
 	_create_persona_btn.pressed.connect(func() -> void: _open_persona_editor(""))
 	_edit_persona_btn.pressed.connect(func() -> void: _open_persona_editor(_selected_persona_id))
 	_persona_list.item_selected.connect(_on_persona_selected)
@@ -92,6 +109,221 @@ func _wire_events() -> void:
 	_system_prompt.focus_exited.connect(_save_settings)
 	_input.gui_input.connect(_on_input_gui_input)
 	_input.text_changed.connect(_on_input_text_changed)
+
+
+# ------------------------------------------------------------------ переписки
+
+func _setup_chats() -> void:
+	chats = ChatStoreScript.new()
+	chats.load_all()
+	_refresh_chat_list()
+
+
+## Открыть последнюю переписку или начать новую, если сохранённых нет.
+func _restore_chat() -> void:
+	if chats.count() == 0:
+		_current_chat_id = ""
+		_new_chat(true)
+		return
+	var chat_id := _current_chat_id
+	if chat_id.is_empty() or chats.get_by_id(chat_id).is_empty():
+		chat_id = str(chats.latest().get("id", ""))
+	_open_chat(chat_id)
+
+
+func _refresh_chat_list() -> void:
+	if _chat_list == null:
+		return
+	_chat_list.clear()
+	if chats.items.is_empty():
+		_chat_list.add_item("Пока нет переписок")
+		_chat_list.set_item_metadata(0, "")
+		_chat_list.set_item_disabled(0, true)
+		_delete_chat_btn.disabled = true
+		return
+
+	for chat in chats.items:
+		var index := _chat_list.item_count
+		var chat_id := str(chat.get("id", ""))
+		var title := str(chat.get("title", ChatStoreScript.EMPTY_TITLE))
+		var when := ChatStoreScript.format_when(int(chat.get("updated_at", 0)))
+		_chat_list.add_item("%s · %s" % [title, when])
+		_chat_list.set_item_metadata(index, chat_id)
+		_chat_list.set_item_tooltip(index, _chat_tooltip(chat))
+		if chat_id == _current_chat_id:
+			_chat_list.select(index)
+	_delete_chat_btn.disabled = _current_chat_id.is_empty()
+
+
+func _chat_tooltip(chat: Dictionary) -> String:
+	var parts: Array[String] = []
+	var persona_name := str(chat.get("persona_name", ""))
+	var model := str(chat.get("model", ""))
+	if not persona_name.is_empty():
+		parts.append("персонаж: " + persona_name)
+	if not model.is_empty():
+		parts.append("модель: " + model)
+	var messages: Array = chat.get("messages", [])
+	parts.append("сообщений: %d" % messages.size())
+	return "\n".join(PackedStringArray(parts))
+
+
+func _on_chat_selected(index: int) -> void:
+	if index < 0 or index >= _chat_list.item_count:
+		return
+	var chat_id := str(_chat_list.get_item_metadata(index))
+	if chat_id.is_empty() or chat_id == _current_chat_id:
+		return
+	_open_chat(chat_id)
+
+
+func _open_chat(chat_id: String) -> void:
+	var chat := chats.get_by_id(chat_id)
+	if chat.is_empty():
+		_show_toast("Переписка не найдена.", "error")
+		return
+	if _busy:
+		_show_toast("Дождитесь ответа модели или нажмите «Стоп».", "error")
+		_refresh_chat_list()
+		return
+
+	_persist_current_chat()
+	_current_chat_id = chat_id
+	_delete_chat_armed = false
+	_delete_chat_btn.text = "Удалить"
+	_apply_chat_context(chat)
+
+	_clear_messages()
+	var messages: Array = chat.get("messages", [])
+	history = messages.duplicate(true)
+	_chat_dirty = false
+	_render_history()
+	_refresh_chat_list()
+	_save_settings()
+	_scroll_to_bottom()
+
+
+## Вернуть персонажа и модель, с которыми шла эта переписка.
+func _apply_chat_context(chat: Dictionary) -> void:
+	var persona_id := str(chat.get("persona_id", ""))
+	if not persona_id.is_empty() and not personas.get_by_id(persona_id).is_empty():
+		_selected_persona_id = persona_id
+		_apply_persona(persona_id)
+		return
+	_selected_persona_id = ""
+	_apply_chat_plain_model(chat)
+
+
+func _apply_chat_plain_model(chat: Dictionary) -> void:
+	var model := str(chat.get("model", ""))
+	if model.is_empty():
+		_apply_plain_model()
+		_refresh_persona_hint()
+		return
+
+	_saved_model = model
+	var found := _models.find(model)
+	if found != -1:
+		_model_list.select(found)
+		_apply_plain_model()
+		_refresh_persona_hint()
+		return
+	if _models.is_empty():
+		# список моделей ещё не пришёл — просто помним модель переписки
+		client.model = model
+		_model_badge.text = "модель: " + model
+		_refresh_persona_hint()
+		return
+	_apply_plain_model()
+	_refresh_persona_hint()
+
+
+func _render_history() -> void:
+	for entry in history:
+		var role := str(entry.get("role", ""))
+		if role != "user" and role != "assistant":
+			continue
+		var speaker := "Вы"
+		if role == "assistant":
+			speaker = str(entry.get("speaker", ""))
+			if speaker.is_empty():
+				speaker = _current_speaker_name()
+		var bubble := _add_bubble(role, str(entry.get("content", "")), speaker)
+		bubble.finish({})
+
+
+## Дописать текущую переписку на диск (если в ней есть что сохранять).
+func _persist_current_chat() -> void:
+	if history.is_empty() or chats == null:
+		return
+	if not _chat_dirty and not _current_chat_id.is_empty():
+		return
+	if _current_chat_id.is_empty():
+		var fresh := chats.new_chat(_selected_persona_id, _current_persona_name(), client.model)
+		_current_chat_id = str(fresh.get("id", ""))
+	var saved := chats.save_chat({
+		"id": _current_chat_id,
+		"persona_id": _selected_persona_id,
+		"persona_name": _current_persona_name(),
+		"model": client.model,
+		"messages": history,
+	})
+	if saved.is_empty():
+		_show_toast("Не удалось сохранить переписку.", "error")
+		return
+	_chat_dirty = false
+	_refresh_chat_list()
+
+
+func _drop_current_chat() -> void:
+	if _current_chat_id.is_empty():
+		return
+	chats.delete_chat(_current_chat_id)
+	_current_chat_id = ""
+	_refresh_chat_list()
+	_save_settings()
+
+
+func _on_delete_chat_pressed() -> void:
+	if _current_chat_id.is_empty():
+		_show_toast("Нет открытой переписки.", "info")
+		return
+	if not _delete_chat_armed:
+		_delete_chat_armed = true
+		_delete_chat_btn.text = "Точно?"
+		return
+	chats.delete_chat(_current_chat_id)
+	_current_chat_id = ""
+	_delete_chat_armed = false
+	_delete_chat_btn.text = "Удалить"
+	_clear_messages()
+	history.clear()
+	_chat_dirty = false
+	_set_busy(false)
+	_refresh_chat_list()
+	_save_settings()
+	_welcome_message()
+	_show_toast("Переписка удалена.", "info")
+
+
+func _clear_messages() -> void:
+	for child in _messages.get_children():
+		child.queue_free()
+	_assistant_bubble = null
+
+
+func _current_persona_name() -> String:
+	var persona := _current_persona()
+	if persona.is_empty():
+		return ""
+	return str(persona.get("name", ""))
+
+
+func _current_speaker_name() -> String:
+	var persona_name := _current_persona_name()
+	if not persona_name.is_empty():
+		return persona_name
+	return client.model
 
 
 # ------------------------------------------------------------------ персонажи
@@ -446,11 +678,10 @@ func _send() -> void:
 	_on_input_text_changed()
 	_history_add("user", text)
 	_add_bubble("user", text, "Вы")
+	# сообщение сразу попадает в сохранённую переписку — не потеряется при сбое
+	_persist_current_chat()
 
-	var persona := _current_persona()
-	var speaker := client.model
-	if not persona.is_empty():
-		speaker = str(persona.get("name", ""))
+	var speaker := _current_speaker_name()
 	_assistant_bubble = ChatBubbleScript.new()
 	_assistant_bubble.setup("assistant", "", speaker)
 	_messages.add_child(_assistant_bubble)
@@ -477,6 +708,7 @@ func _on_chat_done(full_text: String, stats: Dictionary) -> void:
 	if is_instance_valid(_assistant_bubble):
 		_assistant_bubble.finish(stats)
 	_history_add("assistant", full_text)
+	_persist_current_chat()
 	_set_busy(false)
 	_scroll_to_bottom()
 	_input.grab_focus()
@@ -487,6 +719,7 @@ func _on_chat_cancelled(partial_text: String) -> void:
 		_assistant_bubble.finish({"cancelled": true})
 	if not partial_text.strip_edges().is_empty():
 		_history_add("assistant", partial_text)
+		_persist_current_chat()
 	_set_busy(false)
 	_show_toast("Генерация остановлена.", "info")
 
@@ -498,6 +731,12 @@ func _on_chat_error(message: String) -> void:
 	# чтобы при повторной отправке оно не дублировалось.
 	if not history.is_empty() and history[-1].get("role", "") == "user":
 		history.pop_back()
+	if history.is_empty():
+		# переписка состояла из одного неудачного сообщения — не храним пустую
+		_drop_current_chat()
+	else:
+		_chat_dirty = true
+		_persist_current_chat()
 	_set_busy(false)
 	_show_toast(message, "error")
 	_scroll_to_bottom()
@@ -512,12 +751,22 @@ func _set_busy(busy: bool) -> void:
 
 
 func _history_add(role: String, content: String) -> void:
-	history.append({"role": role, "content": content})
+	var entry := {"role": role, "content": content}
+	if role == "assistant":
+		entry["speaker"] = _current_speaker_name()
+	history.append(entry)
+	_chat_dirty = true
 
 
 func _history_window() -> Array:
 	var start := maxi(0, history.size() - MAX_HISTORY_MESSAGES)
-	return history.slice(start)
+	var out: Array = []
+	for entry in history.slice(start):
+		out.append({
+			"role": str(entry.get("role", "")),
+			"content": str(entry.get("content", "")),
+		})
+	return out
 
 
 func _add_bubble(role: String, text: String, meta: String = "") -> ChatBubbleScript:
@@ -530,11 +779,16 @@ func _add_bubble(role: String, text: String, meta: String = "") -> ChatBubbleScr
 func _new_chat(add_welcome: bool = true) -> void:
 	if client != null and client.is_busy():
 		client.cancel()
-	for child in _messages.get_children():
-		child.queue_free()
+	_persist_current_chat()
+	_current_chat_id = ""
+	_delete_chat_armed = false
+	_delete_chat_btn.text = "Удалить"
+	_clear_messages()
 	history.clear()
-	_assistant_bubble = null
+	_chat_dirty = false
 	_set_busy(false)
+	_refresh_chat_list()
+	_save_settings()
 	if add_welcome:
 		_welcome_message()
 
@@ -553,6 +807,7 @@ func _welcome_message() -> void:
 
 Сервер по умолчанию — `http://localhost:11434`, его можно поменять в настройках.
 
+Переписки сохраняются сами: вернуться к любой можно в списке слева.
 Хотите характер — нажмите «+ Создать»: имя, основа и темперамент."""
 	else:
 		var persona_name := str(persona.get("name", ""))
@@ -614,6 +869,7 @@ func _load_settings() -> void:
 	_host_edit.text = str(cfg.get_value("server", "host", _host_edit.text))
 	_saved_model = str(cfg.get_value("server", "model", ""))
 	_selected_persona_id = str(cfg.get_value("persona", "selected", ""))
+	_current_chat_id = str(cfg.get_value("chat", "current", ""))
 	_system_prompt.text = str(cfg.get_value("chat", "system_prompt", ""))
 	_temp_slider.set_value_no_signal(float(cfg.get_value("chat", "temperature", 0.8)))
 	_temp_value.text = "%.2f" % _temp_slider.value
@@ -625,6 +881,7 @@ func _save_settings() -> void:
 	cfg.set_value("server", "host", _host_edit.text.strip_edges())
 	cfg.set_value("server", "model", _saved_model)
 	cfg.set_value("persona", "selected", _selected_persona_id)
+	cfg.set_value("chat", "current", _current_chat_id)
 	cfg.set_value("chat", "system_prompt", _system_prompt.text)
 	cfg.set_value("chat", "temperature", float(_temp_slider.value))
 	cfg.set_value("chat", "stream", _stream_check.button_pressed)
@@ -638,4 +895,5 @@ func _on_temperature_changed(value: float) -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST and is_node_ready():
+		_persist_current_chat()
 		_save_settings()
