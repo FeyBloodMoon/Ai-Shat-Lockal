@@ -1,0 +1,250 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+
+[node name="Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_main")
+
+[node name="Bg" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.058824, 0.07451, 0.094118, 1)
+
+[node name="Layout" type="HBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = 12.0
+offset_right = -12.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 12
+
+[node name="Sidebar" type="PanelContainer" parent="Layout"]
+custom_minimum_size = Vector2(280, 0)
+layout_mode = 2
+
+[node name="SidebarMargin" type="MarginContainer" parent="Layout/Sidebar"]
+layout_mode = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 14
+
+[node name="SidebarBox" type="VBoxContainer" parent="Layout/Sidebar/SidebarMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="AppTitle" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Ollama Chat"
+
+[node name="StatusRow" type="HBoxContainer" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="StatusDot" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.984314, 0.74902, 0.141176, 1)
+theme_override_font_sizes/font_size = 13
+text = "●"
+
+[node name="StatusLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.984314, 0.74902, 0.141176, 1)
+theme_override_font_sizes/font_size = 13
+text = "подключение…"
+
+[node name="RefreshBtn" type="Button" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Обновить список моделей"
+
+[node name="ModelsHeader" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+layout_mode = 2
+theme_type_variation = &"SectionLabel"
+text = "МОДЕЛИ"
+
+[node name="ModelList" type="ItemList" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 120)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Sep1" type="HSeparator" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+layout_mode = 2
+
+[node name="SettingsHeader" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+layout_mode = 2
+theme_type_variation = &"SectionLabel"
+text = "НАСТРОЙКИ"
+
+[node name="HostLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+text = "Адрес сервера Ollama"
+
+[node name="HostEdit" type="LineEdit" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "http://localhost:11434"
+
+[node name="SysLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+text = "Системный промпт"
+
+[node name="SystemPromptEdit" type="TextEdit" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 62)
+layout_mode = 2
+placeholder_text = "Например: отвечай коротко и по-русски"
+wrap_mode = 1
+
+[node name="TempRow" type="HBoxContainer" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+layout_mode = 2
+
+[node name="TempLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox/TempRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"DimLabel"
+text = "Температура"
+
+[node name="TempValue" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarBox/TempRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+text = "0.80"
+
+[node name="TempSlider" type="HSlider" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+unique_name_in_owner = true
+layout_mode = 2
+max_value = 2.0
+step = 0.05
+value = 0.8
+
+[node name="StreamCheck" type="CheckBox" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+unique_name_in_owner = true
+layout_mode = 2
+button_pressed = true
+text = "Потоковый ответ"
+
+[node name="Sep2" type="HSeparator" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+layout_mode = 2
+
+[node name="NewChatBtn" type="Button" parent="Layout/Sidebar/SidebarMargin/SidebarBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Новый диалог"
+
+[node name="ChatColumn" type="VBoxContainer" parent="Layout"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="Header" type="PanelContainer" parent="Layout/ChatColumn"]
+layout_mode = 2
+
+[node name="HeaderMargin" type="MarginContainer" parent="Layout/ChatColumn/Header"]
+layout_mode = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 8
+
+[node name="HeaderBox" type="HBoxContainer" parent="Layout/ChatColumn/Header/HeaderMargin"]
+layout_mode = 2
+
+[node name="ChatTitle" type="Label" parent="Layout/ChatColumn/Header/HeaderMargin/HeaderBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 16
+text = "Диалог"
+
+[node name="ModelBadge" type="Label" parent="Layout/ChatColumn/Header/HeaderMargin/HeaderBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+text = "модель: —"
+
+[node name="ChatScroll" type="ScrollContainer" parent="Layout/ChatColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+follow_focus = true
+horizontal_scroll_mode = 0
+
+[node name="Messages" type="VBoxContainer" parent="Layout/ChatColumn/ChatScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="Composer" type="PanelContainer" parent="Layout/ChatColumn"]
+layout_mode = 2
+
+[node name="ComposerMargin" type="MarginContainer" parent="Layout/ChatColumn/Composer"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="ComposerBox" type="VBoxContainer" parent="Layout/ChatColumn/Composer/ComposerMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="InputRow" type="HBoxContainer" parent="Layout/ChatColumn/Composer/ComposerMargin/ComposerBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="InputEdit" type="TextEdit" parent="Layout/ChatColumn/Composer/ComposerMargin/ComposerBox/InputRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 64)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+placeholder_text = "Напишите сообщение…"
+wrap_mode = 1
+
+[node name="ButtonsCol" type="VBoxContainer" parent="Layout/ChatColumn/Composer/ComposerMargin/ComposerBox/InputRow"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SendBtn" type="Button" parent="Layout/ChatColumn/Composer/ComposerMargin/ComposerBox/InputRow/ButtonsCol"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(116, 0)
+layout_mode = 2
+theme_type_variation = &"AccentButton"
+text = "Отправить"
+
+[node name="StopBtn" type="Button" parent="Layout/ChatColumn/Composer/ComposerMargin/ComposerBox/InputRow/ButtonsCol"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(116, 0)
+layout_mode = 2
+disabled = true
+text = "Стоп"
+
+[node name="Hint" type="Label" parent="Layout/ChatColumn/Composer/ComposerMargin/ComposerBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.545098, 0.592157, 0.658824, 1)
+theme_override_font_sizes/font_size = 11
+text = "Enter — отправить · Shift+Enter — новая строка · Ctrl+Enter — тоже отправить"
