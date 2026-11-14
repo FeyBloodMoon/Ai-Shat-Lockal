@@ -15,6 +15,7 @@ const UiThemeScript = preload("res://scripts/ui_theme.gd")
 const PersonaStoreScript = preload("res://scripts/personas.gd")
 const PersonaEditorScript = preload("res://scripts/persona_editor.gd")
 const ChatStoreScript = preload("res://scripts/chat_store.gd")
+const StartScreenScript = preload("res://scripts/start_screen.gd")
 
 const SETTINGS_PATH := "user://ollama_chat.cfg"
 ## Сколько последних сообщений отправлять модели (чтобы не раздувать контекст).
@@ -22,6 +23,7 @@ const MAX_HISTORY_MESSAGES := 40
 const HINT_TEXT := "Enter — отправить · Shift+Enter — новая строка · Ctrl+Enter — тоже отправить"
 const PLAIN_MODE_HINT := "Модель настраивается один раз: имя, основа и темперамент."
 
+@onready var _start_screen: StartScreenScript = %StartScreen
 @onready var _chat_list: ItemList = %ChatList
 @onready var _new_chat_btn: Button = %NewChatBtn
 @onready var _delete_chat_btn: Button = %DeleteChatBtn
@@ -95,6 +97,10 @@ func _wire_events() -> void:
 	_new_chat_btn.pressed.connect(func() -> void: _new_chat(true))
 	_delete_chat_btn.pressed.connect(_on_delete_chat_pressed)
 	_chat_list.item_selected.connect(_on_chat_selected)
+	_start_screen.persona_chosen.connect(_on_start_persona)
+	_start_screen.model_chosen.connect(_on_start_model)
+	_start_screen.create_persona_requested.connect(func() -> void: _open_persona_editor(""))
+	_start_screen.continue_requested.connect(_open_chat)
 	_create_persona_btn.pressed.connect(func() -> void: _open_persona_editor(""))
 	_edit_persona_btn.pressed.connect(func() -> void: _open_persona_editor(_selected_persona_id))
 	_persona_list.item_selected.connect(_on_persona_selected)
@@ -119,16 +125,59 @@ func _setup_chats() -> void:
 	_refresh_chat_list()
 
 
-## Открыть последнюю переписку или начать новую, если сохранённых нет.
+## Запуск всегда начинается с экрана «С кем поговорим?»: последняя переписка
+## доступна там же кнопкой «Продолжить» и в списке слева.
 func _restore_chat() -> void:
-	if chats.count() == 0:
-		_current_chat_id = ""
-		_new_chat(true)
+	_current_chat_id = ""
+	_new_chat(true)
+
+
+func _show_start_screen() -> void:
+	if _start_screen == null:
 		return
-	var chat_id := _current_chat_id
-	if chat_id.is_empty() or chats.get_by_id(chat_id).is_empty():
-		chat_id = str(chats.latest().get("id", ""))
-	_open_chat(chat_id)
+	_start_screen.refresh(personas.items, _models, chats.latest())
+	_start_screen.visible = true
+	_scroll.visible = false
+
+
+func _hide_start_screen() -> void:
+	if _start_screen == null:
+		return
+	_start_screen.visible = false
+	_scroll.visible = true
+
+
+func _refresh_start_screen() -> void:
+	if _start_screen == null or not _start_screen.visible:
+		return
+	_start_screen.refresh(personas.items, _models, chats.latest())
+
+
+func _on_start_persona(persona_id: String) -> void:
+	if personas.get_by_id(persona_id).is_empty():
+		return
+	_refresh_persona_list()
+	_apply_persona(persona_id)
+	_hide_start_screen()
+	_save_settings()
+	_input.grab_focus()
+
+
+func _on_start_model(model: String) -> void:
+	_selected_persona_id = ""
+	_refresh_persona_list()
+	var found := _models.find(model)
+	if found != -1:
+		_model_list.select(found)
+		_on_model_selected(found)
+	else:
+		client.model = model
+		_saved_model = model
+		_model_badge.text = "модель: " + model
+	_refresh_persona_hint()
+	_hide_start_screen()
+	_save_settings()
+	_input.grab_focus()
 
 
 func _refresh_chat_list() -> void:
@@ -193,6 +242,7 @@ func _open_chat(chat_id: String) -> void:
 	_delete_chat_btn.text = "Удалить"
 	_apply_chat_context(chat)
 
+	_hide_start_screen()
 	_clear_messages()
 	var messages: Array = chat.get("messages", [])
 	history = messages.duplicate(true)
@@ -302,7 +352,7 @@ func _on_delete_chat_pressed() -> void:
 	_set_busy(false)
 	_refresh_chat_list()
 	_save_settings()
-	_welcome_message()
+	_show_start_screen()
 	_show_toast("Переписка удалена.", "info")
 
 
@@ -518,6 +568,7 @@ func _on_persona_saved(data: Dictionary) -> void:
 	_refresh_persona_list()
 	_apply_persona(persona_id)
 	_save_settings()
+	_refresh_start_screen()
 	_show_toast(message, "ok")
 
 
@@ -534,6 +585,7 @@ func _on_persona_deleted(persona_id: String) -> void:
 	_refresh_persona_list()
 	_refresh_persona_hint()
 	_save_settings()
+	_refresh_start_screen()
 	_show_toast("Модель «%s» удалена." % persona_name, "info")
 
 
@@ -601,6 +653,7 @@ func _on_models_loaded(models: Array) -> void:
 		_show_toast("Нет ни одной модели. В терминале: ollama pull llama3.2", "error")
 		_model_badge.text = "модель: —"
 		_refresh_persona_list()
+		_refresh_start_screen()
 		return
 
 	var persona := _current_persona()
@@ -619,6 +672,7 @@ func _on_models_loaded(models: Array) -> void:
 		_model_list.select(index)
 		_on_model_selected(index)
 	_refresh_persona_list()
+	_refresh_start_screen()
 
 
 func _on_models_error(message: String) -> void:
@@ -674,6 +728,7 @@ func _send() -> void:
 		_show_toast("Сначала выберите модель в списке слева.", "error")
 		return
 
+	_hide_start_screen()
 	_input.text = ""
 	_on_input_text_changed()
 	_history_add("user", text)
@@ -776,7 +831,7 @@ func _add_bubble(role: String, text: String, meta: String = "") -> ChatBubbleScr
 	return bubble
 
 
-func _new_chat(add_welcome: bool = true) -> void:
+func _new_chat(show_start: bool = true) -> void:
 	if client != null and client.is_busy():
 		client.cancel()
 	_persist_current_chat()
@@ -789,37 +844,9 @@ func _new_chat(add_welcome: bool = true) -> void:
 	_set_busy(false)
 	_refresh_chat_list()
 	_save_settings()
-	if add_welcome:
-		_welcome_message()
-
-
-func _welcome_message() -> void:
-	var persona := _current_persona()
-	var text := ""
-	var meta := "подсказка"
-	if persona.is_empty():
-		text = """Привет! Я чат внутри Godot, а отвечает **локальная модель** через Ollama.
-
-Как пользоваться:
-1. Запустите сервер: `ollama serve`
-2. Скачайте модель: `ollama pull llama3.2`
-3. Выберите модель в списке слева и напишите сообщение.
-
-Сервер по умолчанию — `http://localhost:11434`, его можно поменять в настройках.
-
-Переписки сохраняются сами: вернуться к любой можно в списке слева.
-Хотите характер — нажмите «+ Создать»: имя, основа и темперамент."""
-	else:
-		var persona_name := str(persona.get("name", ""))
-		var persona_base := str(persona.get("base_model", ""))
-		var traits := PersonaStoreScript.describe(persona)
-		meta = persona_name
-		text = "Привет! Я **%s** — персонаж на основе модели `%s`.\n\n" % [persona_name, persona_base]
-		if not traits.is_empty():
-			text += "Мой темперамент: %s.\n\n" % traits
-		text += "Напишите сообщение. Настройки персонажа — кнопкой «Настроить» слева."
-	var bubble := _add_bubble("assistant", text, meta)
-	bubble.finish({})
+	_refresh_start_screen()
+	if show_start:
+		_show_start_screen()
 
 
 func _set_status(text: String, kind: String) -> void:

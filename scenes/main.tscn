@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/start_screen.gd" id="2_start"]
 
 [node name="Main" type="Control"]
 layout_mode = 3
@@ -253,6 +254,13 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 10
+
+[node name="StartScreen" type="Control" parent="Layout/ChatColumn"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
+script = ExtResource("2_start")
 
 [node name="Composer" type="PanelContainer" parent="Layout/ChatColumn"]
 layout_mode = 2
