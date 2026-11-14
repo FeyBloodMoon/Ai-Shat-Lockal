@@ -40,12 +40,32 @@ func _run() -> void:
 	_check(ui.get_node("%ModelBadge").text.contains("llama3.2"), "бейдж модели обновился")
 	_check(ui.get_node("%StatusLabel").text.contains("mock"), "статус показывает версию сервера")
 
+	# --- стартовый экран: выбор персонажа или модели
+	var start = ui.get_node("%StartScreen")
+	_check(start.visible, "старт: экран выбора открыт")
+	_check(not ui.get_node("%ChatScroll").visible, "старт: переписка скрыта")
+	_check(start.model_buttons.size() == 2, "старт: модели в выборе (%d)" % start.model_buttons.size())
+	_check(start.persona_buttons.is_empty(), "старт: персонажей пока нет")
+	start.create_persona_btn.pressed.emit()
+	await process_frame
+	_check(ui._persona_editor.visible, "старт: «+ Создать персонажа» открывает форму")
+	ui._persona_editor.cancel_btn.pressed.emit()
+	await process_frame
+	start.model_buttons["llama3.2:latest"].pressed.emit()
+	await process_frame
+	_check(not start.visible and bool(ui.get_node("%ChatScroll").visible),
+		"старт: выбор модели открывает чат")
+	_check(ui.client.model == "llama3.2:latest", "старт: модель применилась")
+	ui._new_chat(true)
+	await process_frame
+	_check(bool(ui.get_node("%StartScreen").visible), "старт: «+ Диалог» снова показывает выбор")
+
 	# --- обычная отправка со стримингом
 	var input: TextEdit = ui.get_node("%InputEdit")
 	input.text = "привет"
 	ui._send()
 	var messages: VBoxContainer = ui.get_node("%Messages")
-	var got: bool = await _wait_until(func() -> bool: return not ui._busy and messages.get_child_count() >= 3, 15.0)
+	var got: bool = await _wait_until(func() -> bool: return not ui._busy and messages.get_child_count() >= 2, 15.0)
 	_check(got, "ответ получен, пузыри добавились (%d)" % messages.get_child_count())
 
 	var bubbles := messages.get_children()
@@ -76,7 +96,8 @@ func _run() -> void:
 	# --- новый диалог
 	ui._new_chat(true)
 	await process_frame
-	_check(messages.get_child_count() == 1, "новый диалог: остался только приветственный пузырь")
+	_check(messages.get_child_count() == 0, "новый диалог: сообщений нет")
+	_check(bool(ui.get_node("%StartScreen").visible), "новый диалог: открыт экран выбора")
 	_check(ui.history.is_empty(), "новый диалог: история очищена")
 
 	await _test_personas(ui, input, model_list)
@@ -188,6 +209,10 @@ func _test_chats(ui: Control, input: TextEdit) -> void:
 	_check(ui._current_chat_id.is_empty(), "переписки: новый диалог без id")
 	_check(ui.history.is_empty(), "переписки: новый диалог пуст")
 	_check(delete_btn.disabled, "переписки: в новом диалоге удалять нечего")
+	var start = ui.get_node("%StartScreen")
+	_check(start.visible, "переписки: новый диалог показывает экран выбора")
+	_check(start.continue_btn != null and start.continue_btn.text.contains("первая переписка"),
+		"переписки: «Продолжить» ведёт в последнюю переписку")
 
 	input.text = "вторая переписка про море"
 	ui._send()
@@ -219,10 +244,11 @@ func _test_chats(ui: Control, input: TextEdit) -> void:
 	_check(ui.chats.count() == 1, "переписки: переписка удалена")
 	_check(ui._current_chat_id.is_empty(), "переписки: открыт новый диалог")
 	_check(ui.history.is_empty(), "переписки: история очищена")
-	_check(bubbles.get_child_count() == 1, "переписки: остался только приветственный пузырь")
+	_check(bubbles.get_child_count() == 0, "переписки: сообщения убраны")
+	_check(bool(ui.get_node("%StartScreen").visible), "переписки: экран выбора вернулся")
 	_check(delete_btn.text == "Удалить", "переписки: кнопка удаления сброшена")
 
-	# перезапуск: последняя переписка открывается сама
+	# перезапуск: сначала экран выбора, переписка — по «Продолжить» или из списка
 	ui.queue_free()
 	await process_frame
 	await process_frame
@@ -234,11 +260,20 @@ func _test_chats(ui: Control, input: TextEdit) -> void:
 	_check(models_ready, "перезапуск: модели подтянулись")
 	await process_frame
 	_check(again.chats.count() == 1, "перезапуск: переписка найдена (%d)" % again.chats.count())
+	var again_start = again.get_node("%StartScreen")
+	_check(again_start.visible, "перезапуск: открыт экран выбора")
+	_check(again.history.is_empty(), "перезапуск: чат сразу не открывается")
+	_check(again_start.continue_btn != null, "перезапуск: есть «Продолжить»")
+	if again_start.continue_btn != null:
+		again_start.continue_btn.pressed.emit()
+	await process_frame
+	await process_frame
 	_check(again.history.size() == 2, "перезапуск: история восстановлена (%d)" % again.history.size())
 	_check(again.get_node("%Messages").get_child_count() == 2,
 		"перезапуск: пузыри восстановлены (%d)" % again.get_node("%Messages").get_child_count())
 	_check(again.get_node("%ChatList").item_count == 1, "перезапуск: строка в списке")
 	_check(not again._current_chat_id.is_empty(), "перезапуск: переписка выбрана")
+	_check(not again_start.visible, "перезапуск: экран выбора закрылся")
 
 
 func _option_index(option: OptionButton, text: String) -> int:
@@ -295,6 +330,20 @@ func _test_personas(ui: Control, input: TextEdit, model_list: ItemList) -> void:
 	_check(ui.get_node("%PersonaHint").text.contains("Дружелюбный"),
 		"персонажи: подпись показывает темперамент")
 	_check(ui.client.model == "qwen2.5-coder:7b", "персонажи: клиент переключён на основу")
+
+	# --- персонаж доступен на стартовом экране
+	var start = ui.get_node("%StartScreen")
+	var new_persona_id := str(ui.personas.items[0].get("id", ""))
+	_check(start.persona_buttons.size() == 1, "старт: персонаж появился в выборе")
+	_check(start.persona_buttons.has(new_persona_id), "старт: карточка по id персонажа")
+	if start.persona_buttons.has(new_persona_id):
+		_check(start.persona_buttons[new_persona_id].text.contains("Бородач"),
+			"старт: на карточке имя персонажа")
+		start.persona_buttons[new_persona_id].pressed.emit()
+		await process_frame
+	_check(not start.visible, "старт: выбор персонажа закрывает экран")
+	_check(ui.get_node("%ModelBadge").text.contains("Бородач"),
+		"старт: персонаж применён (%s)" % ui.get_node("%ModelBadge").text)
 
 	# --- чат идёт на основу персонажа с собранным промптом
 	var persona_name := str(ui.personas.items[0].get("name", ""))

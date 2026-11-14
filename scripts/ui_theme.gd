@@ -81,6 +81,32 @@ static func build() -> Theme:
 	t.set_color("font_pressed_color", "TraitButton", Color.WHITE)
 	t.set_color("font_hover_pressed_color", "TraitButton", Color.WHITE)
 
+	# --- карточки стартового экрана
+	t.set_type_variation("CardButton", "Button")
+	var card_normal := _box(PANEL_ALT, 10, BORDER, 1)
+	card_normal.content_margin_left = 14
+	card_normal.content_margin_right = 14
+	card_normal.content_margin_top = 11
+	card_normal.content_margin_bottom = 11
+	t.set_stylebox("normal", "CardButton", card_normal)
+	var card_hover := _box(PANEL_ALT.lightened(0.08), 10, ACCENT, 1)
+	card_hover.content_margin_left = 14
+	card_hover.content_margin_right = 14
+	card_hover.content_margin_top = 11
+	card_hover.content_margin_bottom = 11
+	t.set_stylebox("hover", "CardButton", card_hover)
+	var card_pressed := _box(ACCENT.darkened(0.1), 10, ACCENT, 1)
+	card_pressed.content_margin_left = 14
+	card_pressed.content_margin_right = 14
+	card_pressed.content_margin_top = 11
+	card_pressed.content_margin_bottom = 11
+	t.set_stylebox("pressed", "CardButton", card_pressed)
+	t.set_stylebox("focus", "CardButton", StyleBoxEmpty.new())
+	t.set_color("font_color", "CardButton", TEXT)
+	t.set_color("font_hover_color", "CardButton", Color.WHITE)
+	t.set_color("font_pressed_color", "CardButton", Color.WHITE)
+	t.set_font_size("font_size", "CardButton", 16)
+
 	# --- «Удалить»
 	t.set_type_variation("DangerButton", "Button")
 	t.set_stylebox("normal", "DangerButton", _box(Color("#3a1d22"), 8, ERROR, 1))
