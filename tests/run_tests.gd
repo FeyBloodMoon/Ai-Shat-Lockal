@@ -1,5 +1,6 @@
 extends SceneTree
-## Headless-тесты проекта: разбор Markdown, клиент Ollama (стриминг, ошибки, отмена).
+## Headless-тесты проекта: разбор Markdown, клиент Ollama (стриминг, ошибки, отмена),
+## OpenAI-совместимый провайдер (SSE, ключ, список моделей).
 ##
 ## Запуск:
 ##   python3 tools/mock_ollama.py --port 11499 &
@@ -12,6 +13,7 @@ const ChatStoreScript = preload("res://scripts/chat_store.gd")
 
 const HOST := "http://127.0.0.1:11499"
 const DUMP := "/tmp/mock_last_request.json"
+const HEADERS_DUMP := "/tmp/mock_last_headers.json"
 const EXPECTED_REPLY := "Привет! Это **тестовый** ответ от мок-сервера.\n\nСписок:\n- первый пункт\n- второй пункт\n\n```gdscript\nprint(\"hello\")\n```\n\nГотово."
 
 var passed := 0
@@ -36,6 +38,11 @@ func _run() -> void:
 	await _test_cancel()
 	await _test_unreachable()
 	await _test_payload_has_system_and_options()
+	await _test_openai_models()
+	await _test_openai_stream()
+	await _test_openai_nonstream()
+	await _test_openai_bad_key()
+	await _test_openai_unreachable()
 	print("\nИтого: %d ок, %d провалено" % [passed, failed])
 	quit(0 if failed == 0 else 1)
 
@@ -248,6 +255,16 @@ func _new_client() -> Node:
 	return client
 
 
+func _new_openai_client() -> Node:
+	var client = ClientScript.new()
+	root.add_child(client)
+	client.provider = "openai"
+	client.host = HOST + "/v1"
+	client.api_key = "test-key"
+	client.request_timeout = 20.0
+	return client
+
+
 func _wait_until(condition: Callable, timeout: float = 15.0) -> bool:
 	var started := Time.get_ticks_msec()
 	while not condition.call():
@@ -428,6 +445,124 @@ func _test_payload_has_system_and_options() -> void:
 			"запрос: температура передана")
 		_check(data.get("stream", false) == true, "запрос: stream = true")
 		_check(str(data.get("keep_alive", "")) == "10m", "запрос: keep_alive передан")
+	client.queue_free()
+
+
+# ------------------------------------------------------------------ OpenAI-совместимый API
+
+func _test_openai_models() -> void:
+	var client := _new_openai_client()
+	var state := {"models": [], "error": "", "done": false}
+	client.models_loaded.connect(func(m: Array) -> void:
+		state.models = m
+		state.done = true)
+	client.models_error.connect(func(m: String) -> void:
+		state.error = m
+		state.done = true)
+
+	client.fetch_models()
+	var finished: bool = await _wait_until(func() -> bool: return state.done)
+	_check(finished, "облако: список моделей получен")
+	_check(state.models.size() == 2, "облако: моделей 2 (%s)" % [state.models])
+	_check(state.models.has("qwen2.5-coder:7b"), "облако: id моделей из data[].id")
+	client.queue_free()
+
+
+func _test_openai_stream() -> void:
+	var client := _new_openai_client()
+	client.model = "llama3.2:latest"
+	client.temperature = 0.5
+	var state := {"text": "", "deltas": 0, "stats": {}, "error": "", "done": false}
+	client.chat_delta.connect(func(piece: String) -> void:
+		state.text += piece
+		state.deltas += 1)
+	client.chat_done.connect(func(full: String, stats: Dictionary) -> void:
+		state.text = full
+		state.stats = stats
+		state.done = true)
+	client.chat_error.connect(func(message: String) -> void:
+		state.error = message
+		state.done = true)
+
+	client.send_chat([{"role": "user", "content": "привет"}])
+	var finished: bool = await _wait_until(func() -> bool: return state.done)
+	_check(finished, "облако: стриминг завершился")
+	_check(state.error.is_empty(), "облако: без ошибок (%s)" % state.error)
+	_check(state.deltas > 5, "облако: SSE пришёл кусками (%d)" % state.deltas)
+	_check(state.text == EXPECTED_REPLY, "облако: текст собран целиком")
+	_check(int(state.stats.get("eval_count", 0)) == 42, "облако: токены из usage")
+	_check(not client.is_busy(), "облако: клиент освободился")
+
+	var dump_file := FileAccess.open(DUMP, FileAccess.READ)
+	if dump_file != null:
+		var payload: Dictionary = JSON.parse_string(dump_file.get_as_text())
+		dump_file.close()
+		_check(payload.get("stream", false) == true, "облако: stream = true в запросе")
+		_check(not payload.has("options"), "облако: без полей Ollama (options/keep_alive)")
+		_check(absf(float(payload.get("temperature", -1.0)) - 0.5) < 0.001,
+			"облако: температура в теле запроса")
+	var headers_file := FileAccess.open(HEADERS_DUMP, FileAccess.READ)
+	if headers_file != null:
+		var headers: Dictionary = JSON.parse_string(headers_file.get_as_text())
+		headers_file.close()
+		_check(str(headers.get("Authorization", "")) == "Bearer test-key",
+			"облако: ключ ушёл в Authorization")
+	client.queue_free()
+
+
+func _test_openai_nonstream() -> void:
+	var client := _new_openai_client()
+	client.model = "llama3.2:latest"
+	client.stream = false
+	var state := {"text": "", "deltas": 0, "error": "", "done": false}
+	client.chat_delta.connect(func(_p: String) -> void: state.deltas += 1)
+	client.chat_done.connect(func(full: String, _stats: Dictionary) -> void:
+		state.text = full
+		state.done = true)
+	client.chat_error.connect(func(message: String) -> void:
+		state.error = message
+		state.done = true)
+
+	client.send_chat([{"role": "user", "content": "привет"}])
+	var finished: bool = await _wait_until(func() -> bool: return state.done)
+	_check(finished, "облако без стриминга: завершился")
+	_check(state.error.is_empty(), "облако без стриминга: без ошибок (%s)" % state.error)
+	_check(state.text == EXPECTED_REPLY, "облако без стриминга: текст из choices[].message")
+	_check(state.deltas == 0, "облако без стриминга: без дельт")
+	client.queue_free()
+
+
+func _test_openai_bad_key() -> void:
+	var client := _new_openai_client()
+	client.model = "llama3.2:latest"
+	client.api_key = "неверный"
+	var state := {"error": "", "done": false}
+	client.chat_done.connect(func(_f: String, _s: Dictionary) -> void: state.done = true)
+	client.chat_error.connect(func(message: String) -> void:
+		state.error = message
+		state.done = true)
+
+	client.send_chat([{"role": "user", "content": "привет"}])
+	var finished: bool = await _wait_until(func() -> bool: return state.done, 10.0)
+	_check(finished, "облако: ошибка ключа пришла")
+	_check(state.error.contains("ключ"), "облако: понятный текст про ключ («%s»)" % state.error)
+	client.queue_free()
+
+
+func _test_openai_unreachable() -> void:
+	var client := _new_openai_client()
+	client.host = "http://127.0.0.1:1/v1"
+	client.model = "llama3.2:latest"
+	var state := {"error": "", "done": false}
+	client.chat_done.connect(func(_f: String, _s: Dictionary) -> void: state.done = true)
+	client.chat_error.connect(func(message: String) -> void:
+		state.error = message
+		state.done = true)
+
+	client.send_chat([{"role": "user", "content": "привет"}])
+	var finished: bool = await _wait_until(func() -> bool: return state.done, 10.0)
+	_check(finished, "облако: недоступный сервер отвечает ошибкой")
+	_check(state.error.contains("/v1"), "облако: подсказка про /v1 («%s»)" % state.error)
 	client.queue_free()
 
 
