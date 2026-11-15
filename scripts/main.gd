@@ -22,6 +22,13 @@ const SETTINGS_PATH := "user://ollama_chat.cfg"
 const MAX_HISTORY_MESSAGES := 40
 const HINT_TEXT := "Enter — отправить · Shift+Enter — новая строка · Ctrl+Enter — тоже отправить"
 const PLAIN_MODE_HINT := "Модель настраивается один раз: имя, основа и темперамент."
+## Провайдеры: локальный Ollama или любой OpenAI-совместимый API.
+const PROVIDERS := ["ollama", "openai"]
+const PROVIDER_LABELS := ["Ollama (локально)", "OpenAI-совместимый API"]
+const DEFAULT_HOSTS := {
+	"ollama": "http://localhost:11434",
+	"openai": "https://ollama.com/v1",
+}
 
 @onready var _start_screen: StartScreenScript = %StartScreen
 @onready var _chat_list: ItemList = %ChatList
@@ -32,7 +39,12 @@ const PLAIN_MODE_HINT := "Модель настраивается один ра�
 @onready var _edit_persona_btn: Button = %EditPersonaBtn
 @onready var _persona_hint: Label = %PersonaHint
 @onready var _model_list: ItemList = %ModelList
+@onready var _provider_option: OptionButton = %ProviderOption
+@onready var _host_label: Label = %HostLabel
 @onready var _host_edit: LineEdit = %HostEdit
+@onready var _api_key_label: Label = %ApiKeyLabel
+@onready var _api_key_edit: LineEdit = %ApiKeyEdit
+@onready var _provider_hint: Label = %ProviderHint
 @onready var _system_prompt: TextEdit = %SystemPromptEdit
 @onready var _temp_slider: HSlider = %TempSlider
 @onready var _temp_value: Label = %TempValue
@@ -64,6 +76,8 @@ var _assistant_bubble: ChatBubbleScript = null
 var _busy: bool = false
 var _version: String = ""
 var _saved_model: String = ""
+## Адрес, запомненный для каждого провайдера: у локального и облачного он разный.
+var _provider_hosts: Dictionary = DEFAULT_HOSTS.duplicate()
 var _hint_token: int = 0
 
 
@@ -82,6 +96,7 @@ func _ready() -> void:
 	client.chat_error.connect(_on_chat_error)
 
 	_wire_events()
+	_setup_provider_ui()
 	_setup_personas()
 	_setup_chats()
 	_load_settings()
@@ -108,8 +123,11 @@ func _wire_events() -> void:
 	_send_btn.pressed.connect(_send)
 	_stop_btn.pressed.connect(_stop)
 	_model_list.item_selected.connect(_on_model_selected)
+	_provider_option.item_selected.connect(_on_provider_selected)
 	_host_edit.text_submitted.connect(func(_t: String) -> void: _apply_host())
 	_host_edit.focus_exited.connect(_apply_host)
+	_api_key_edit.text_submitted.connect(func(_t: String) -> void: _apply_api_key())
+	_api_key_edit.focus_exited.connect(_apply_api_key)
 	_temp_slider.value_changed.connect(_on_temperature_changed)
 	_stream_check.toggled.connect(func(_p: bool) -> void: _save_settings())
 	_system_prompt.focus_exited.connect(_save_settings)
@@ -605,9 +623,70 @@ func _compose_system_prompt() -> String:
 # ------------------------------------------------------------------ соединение
 
 func _check_connection() -> void:
-	client.host = _host_edit.text.strip_edges()
+	_apply_provider_to_client()
 	_set_status("подключение…", "wait")
 	client.check_connection()
+
+
+## Перенести настройки провайдера из интерфейса в клиент.
+func _apply_provider_to_client() -> void:
+	var index := _provider_option.selected
+	client.provider = "ollama"
+	if index >= 0 and index < PROVIDERS.size():
+		client.provider = str(PROVIDERS[index])
+	client.host = _host_edit.text.strip_edges()
+	client.api_key = _api_key_edit.text.strip_edges()
+
+
+## Переключение «локально / облако»: у каждого провайдера свой адрес.
+func _on_provider_selected(index: int) -> void:
+	var new_provider := "ollama"
+	if index >= 0 and index < PROVIDERS.size():
+		new_provider = str(PROVIDERS[index])
+	if new_provider == client.provider:
+		return
+	_provider_hosts[client.provider] = _host_edit.text.strip_edges()
+	var next_host := str(_provider_hosts.get(new_provider, ""))
+	if next_host.strip_edges().is_empty():
+		next_host = str(DEFAULT_HOSTS[new_provider])
+	_host_edit.text = next_host
+	_apply_provider_to_client()
+	_update_provider_ui()
+	_save_settings()
+	_show_toast("Провайдер: %s" % _provider_label(), "info")
+	_check_connection()
+
+
+func _apply_api_key() -> void:
+	var key := _api_key_edit.text.strip_edges()
+	if key == client.api_key:
+		return
+	client.api_key = key
+	_save_settings()
+	_check_connection()
+
+
+## Названия полей и подсказки зависят от провайдера.
+func _update_provider_ui() -> void:
+	var cloud := client.provider == "openai"
+	_host_label.text = "Адрес API (вместе с /v1)" if cloud else "Адрес сервера Ollama"
+	_host_edit.placeholder_text = str(DEFAULT_HOSTS["openai"]) if cloud else str(DEFAULT_HOSTS["ollama"])
+	_api_key_label.visible = cloud
+	_api_key_edit.visible = cloud
+	_provider_hint.text = (
+		"Ключ хранится только локально (user://ollama_chat.cfg) и уходит только на выбранный сервер."
+		if cloud else "Всё считается на вашей машине: ключ не нужен, интернет не требуется."
+	)
+
+
+func _setup_provider_ui() -> void:
+	for label in PROVIDER_LABELS:
+		_provider_option.add_item(str(label))
+	_provider_option.select(0)
+
+
+func _provider_label() -> String:
+	return "OpenAI-совместимый API" if client.provider == "openai" else "Ollama"
 
 
 func _apply_host() -> void:
@@ -617,13 +696,14 @@ func _apply_host() -> void:
 		return
 	if new_host == client.host:
 		return
+	_provider_hosts[client.provider] = new_host
 	_save_settings()
 	_check_connection()
 
 
 func _refresh_models() -> void:
 	%RefreshBtn.disabled = true
-	client.host = _host_edit.text.strip_edges()
+	_apply_provider_to_client()
 	client.fetch_models()
 
 
@@ -633,12 +713,17 @@ func _on_connection_checked(ok: bool, version: String) -> void:
 		var status_text := "Ollama подключён"
 		if not version.is_empty():
 			status_text = "Ollama %s" % version
+		if client.provider == "openai":
+			status_text = "API подключён"
 		_set_status(status_text, "ok")
 		_refresh_models()
 	else:
 		%RefreshBtn.disabled = false
 		_set_status("нет соединения", "error")
-		_show_toast("Ollama не отвечает. Запустите «ollama serve».", "error")
+		if client.provider == "openai":
+			_show_toast("API-сервер не отвечает. Проверьте адрес, ключ и интернет.", "error")
+		else:
+			_show_toast("Ollama не отвечает. Запустите «ollama serve».", "error")
 
 
 func _on_models_loaded(models: Array) -> void:
@@ -649,8 +734,12 @@ func _on_models_loaded(models: Array) -> void:
 		_model_list.add_item(str(m))
 
 	if models.is_empty():
-		_set_status("Ollama подключён, моделей нет", "error")
-		_show_toast("Нет ни одной модели. В терминале: ollama pull llama3.2", "error")
+		if client.provider == "openai":
+			_set_status("API подключён, моделей нет", "error")
+			_show_toast("Сервер вернул пустой список моделей. Проверьте ключ и адрес API.", "error")
+		else:
+			_set_status("Ollama подключён, моделей нет", "error")
+			_show_toast("Нет ни одной модели. В терминале: ollama pull llama3.2", "error")
 		_model_badge.text = "модель: —"
 		_refresh_persona_list()
 		_refresh_start_screen()
@@ -892,8 +981,19 @@ func _load_settings() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(SETTINGS_PATH) != OK:
 		_temp_value.text = "%.2f" % _temp_slider.value
+		_update_provider_ui()
 		return
-	_host_edit.text = str(cfg.get_value("server", "host", _host_edit.text))
+	var provider_name := str(cfg.get_value("server", "provider", "ollama"))
+	client.provider = provider_name if PROVIDERS.has(provider_name) else "ollama"
+	_provider_option.select(1 if client.provider == "openai" else 0)
+	_provider_hosts["ollama"] = str(cfg.get_value("server", "host_ollama",
+		cfg.get_value("server", "host", DEFAULT_HOSTS["ollama"])))
+	_provider_hosts["openai"] = str(cfg.get_value("server", "host_openai", DEFAULT_HOSTS["openai"]))
+	_host_edit.text = str(_provider_hosts.get(client.provider, DEFAULT_HOSTS["ollama"]))
+	_api_key_edit.text = str(cfg.get_value("server", "api_key", ""))
+	client.host = _host_edit.text.strip_edges()
+	client.api_key = _api_key_edit.text.strip_edges()
+	_update_provider_ui()
 	_saved_model = str(cfg.get_value("server", "model", ""))
 	_selected_persona_id = str(cfg.get_value("persona", "selected", ""))
 	_current_chat_id = str(cfg.get_value("chat", "current", ""))
@@ -905,7 +1005,12 @@ func _load_settings() -> void:
 
 func _save_settings() -> void:
 	var cfg := ConfigFile.new()
+	_provider_hosts[client.provider] = _host_edit.text.strip_edges()
 	cfg.set_value("server", "host", _host_edit.text.strip_edges())
+	cfg.set_value("server", "provider", client.provider)
+	cfg.set_value("server", "api_key", _api_key_edit.text.strip_edges())
+	cfg.set_value("server", "host_ollama", str(_provider_hosts.get("ollama", DEFAULT_HOSTS["ollama"])))
+	cfg.set_value("server", "host_openai", str(_provider_hosts.get("openai", DEFAULT_HOSTS["openai"])))
 	cfg.set_value("server", "model", _saved_model)
 	cfg.set_value("persona", "selected", _selected_persona_id)
 	cfg.set_value("chat", "current", _current_chat_id)

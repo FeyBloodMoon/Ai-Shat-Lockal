@@ -4,8 +4,15 @@
 Реализует то же поведение, что и настоящий сервер:
     GET  /api/version  -> {"version": "0.0.0-mock"}
     GET  /api/tags     -> список моделей
-    POST /api/chat     -> stриминг NDJSON (chunked) или обычный JSON, если stream=false
+    POST /api/chat     -> стриминг NDJSON (chunked) или обычный JSON, если stream=false
                           для неизвестной модели отдаёт 404 + {"error": ...}
+
+И то же самое для OpenAI-совместимого режима (провайдер «openai»):
+    GET  /v1/models              -> {"data": [{"id": ...}]}
+    POST /v1/chat/completions    -> SSE (text/event-stream) или обычный JSON
+                                    без правильного ключа отдаёт 401
+
+Ключ по умолчанию — "test-key" (можно задать через MOCK_API_KEY).
 
 Запуск:  python3 tools/mock_ollama.py [--port 11434]
 """
@@ -40,6 +47,8 @@ LONG_REPLY = (
 )
 
 DUMP_PATH = os.environ.get("MOCK_DUMP", "/tmp/mock_last_request.json")
+HEADERS_PATH = os.environ.get("MOCK_HEADERS", "/tmp/mock_last_headers.json")
+API_KEY = os.environ.get("MOCK_API_KEY", "test-key")
 CHUNK_DELAY = float(os.environ.get("MOCK_DELAY", "0.02"))
 
 
@@ -61,11 +70,23 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b"%x\r\n" % len(data) + data + b"\r\n")
         self.wfile.flush()
 
+    def _authorized(self) -> bool:
+        """Ключ нужен только для OpenAI-совместимых адресов."""
+        if not self.path.startswith("/v1/"):
+            return True
+        return self.headers.get("Authorization", "") == f"Bearer {API_KEY}"
+
     def do_GET(self):
+        if not self._authorized():
+            return self._json({"error": {"message": "invalid api key"}}, 401)
         if self.path == "/api/version":
             self._json({"version": "0.0.0-mock"})
         elif self.path == "/api/tags":
             self._json({"models": [{"name": m, "model": m, "size": 123} for m in MODELS]})
+        elif self.path in ("/v1/models", "/models"):
+            self._json({"object": "list", "data": [
+                {"id": m, "object": "model"} for m in MODELS
+            ]})
         else:
             self._json({"error": "not found"}, 404)
 
@@ -79,7 +100,14 @@ class Handler(BaseHTTPRequestHandler):
 
         with open(DUMP_PATH, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False, indent=2)
+        with open(HEADERS_PATH, "w", encoding="utf-8") as fh:
+            json.dump(dict(self.headers), fh, ensure_ascii=False, indent=2)
 
+        if not self._authorized():
+            return self._json({"error": {"message": "invalid api key"}}, 401)
+
+        if self.path == "/v1/chat/completions":
+            return self._openai_chat(payload)
         if self.path != "/api/chat":
             return self._json({"error": "not found"}, 404)
 
@@ -132,6 +160,68 @@ class Handler(BaseHTTPRequestHandler):
                 "total_duration": 1_200_000_000,
             }, ensure_ascii=False) + "\n"
             self._chunk(final.encode("utf-8"))
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        self.close_connection = True
+
+    # ---------------------------------------------------------- OpenAI-совместимый
+
+    @staticmethod
+    def _reply_for(payload):
+        last_user = ""
+        for message in payload.get("messages", []):
+            if message.get("role") == "user":
+                last_user = message.get("content", "")
+        reply = LONG_REPLY if "длинно" in last_user else REPLY
+        delay = 0.15 if "медленно" in last_user else CHUNK_DELAY
+        return reply, delay
+
+    def _openai_chat(self, payload):
+        model = payload.get("model", "")
+        if model not in MODELS:
+            return self._json(
+                {"error": {"message": f"model '{model}' not found"}}, 404
+            )
+        reply, delay = self._reply_for(payload)
+
+        if not payload.get("stream", True):
+            return self._json({
+                "id": "chatcmpl-mock",
+                "object": "chat.completion",
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": reply},
+                    "finish_reason": "stop",
+                }],
+                "usage": {"prompt_tokens": 12, "completion_tokens": 42, "total_tokens": 54},
+            })
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+        try:
+            for i in range(0, len(reply), 3):
+                event = json.dumps({
+                    "id": "chatcmpl-mock",
+                    "object": "chat.completion.chunk",
+                    "model": model,
+                    "choices": [{"index": 0, "delta": {"content": reply[i:i + 3]}}],
+                }, ensure_ascii=False)
+                self._chunk(f"data: {event}\n\n".encode("utf-8"))
+                time.sleep(delay)
+            final = json.dumps({
+                "id": "chatcmpl-mock",
+                "model": model,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 12, "completion_tokens": 42, "total_tokens": 54},
+            }, ensure_ascii=False)
+            self._chunk(f"data: {final}\n\n".encode("utf-8"))
+            self._chunk(b"data: [DONE]\n\n")
             self.wfile.write(b"0\r\n\r\n")
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):

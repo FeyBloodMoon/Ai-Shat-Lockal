@@ -60,6 +60,41 @@ func _run() -> void:
 	await process_frame
 	_check(bool(ui.get_node("%StartScreen").visible), "старт: «+ Диалог» снова показывает выбор")
 
+	# --- провайдер: локальный Ollama ↔ OpenAI-совместимый API (/v1)
+	var provider_option: OptionButton = ui.get_node("%ProviderOption")
+	var api_key_edit: LineEdit = ui.get_node("%ApiKeyEdit")
+	var host_label: Label = ui.get_node("%HostLabel")
+	_check(provider_option.item_count == 2, "провайдер: два варианта (%d)" % provider_option.item_count)
+	_check(not api_key_edit.visible, "провайдер: локальному Ollama ключ не нужен")
+	_check(str(ui.DEFAULT_HOSTS["openai"]).ends_with("/v1"), "провайдер: адрес облака с /v1")
+
+	# адрес облака уже «знаком» приложению (как будто его вводили раньше)
+	ui._provider_hosts["openai"] = MOCK_HOST + "/v1"
+	api_key_edit.text = "test-key"
+	model_list.clear()
+	provider_option.select(1)
+	provider_option.item_selected.emit(1)
+	await process_frame
+	_check(ui.client.provider == "openai", "провайдер: клиент переключился на облако")
+	_check(host_edit.text == MOCK_HOST + "/v1",
+		"провайдер: вспомнился адрес облака (%s)" % host_edit.text)
+	_check(api_key_edit.visible, "провайдер: появилось поле ключа")
+	_check(host_label.text.contains("/v1"), "провайдер: подпись адреса упоминает /v1")
+	var cloud_status: bool = await _wait_until(func() -> bool:
+		return ui.get_node("%StatusLabel").text == "API подключён", 10.0)
+	_check(cloud_status, "облако: статус «API подключён» (%s)" % ui.get_node("%StatusLabel").text)
+	var cloud_models: bool = await _wait_until(func() -> bool: return model_list.item_count == 2, 10.0)
+	_check(cloud_models, "облако: модели пришли из /v1/models (%d)" % model_list.item_count)
+
+	provider_option.select(0)
+	provider_option.item_selected.emit(0)
+	await process_frame
+	var back_home: bool = await _wait_until(func() -> bool:
+		return ui.client.provider == "ollama" and ui.get_node("%StatusLabel").text.contains("mock"), 10.0)
+	_check(back_home, "провайдер: вернулись к локальному Ollama")
+	_check(host_edit.text == MOCK_HOST, "провайдер: адрес Ollama вспомнился (%s)" % host_edit.text)
+	_check(not api_key_edit.visible, "провайдер: поле ключа снова скрыто")
+
 	# --- обычная отправка со стримингом
 	var input: TextEdit = ui.get_node("%InputEdit")
 	input.text = "привет"

@@ -1,13 +1,20 @@
 extends Node
 class_name OllamaClient
-## Клиент к локальному API Ollama (полностью асинхронный, без блокировки кадра).
+## Клиент к локальному Ollama и к любому OpenAI-совместимому API.
+## Полностью асинхронный, без блокировки кадра. Два режима (переменная provider):
 ##
-## Что умеет:
-##   * список установленных моделей            GET  /api/tags
-##   * проверка, что сервер жив               GET  /api/version
-##   * чат с историей сообщений               POST /api/chat
-##   * потоковая выдача ответа (NDJSON, stream: true) — токен за токеном
-##   * отмена запроса на середине ответа
+##   "ollama" — локальный сервер:
+##       список моделей        GET  /api/tags
+##       проверка соединения   GET  /api/version
+##       чат                   POST /api/chat          (NDJSON, stream: true)
+##
+##   "openai" — OpenAI-совместимый API (Ollama Cloud, OpenAI, Groq, OpenRouter…):
+##       список моделей        GET  /models
+##       чат                   POST /chat/completions  (SSE, stream: true)
+##       адрес указывается вместе с версией, например "https://ollama.com/v1",
+##       ключ уходит в заголовке Authorization: Bearer <api_key>
+##
+## Умеет также: потоковую выдачу токен за токеном и отмену на середине ответа.
 ##
 ## Пример:
 ##   var client := OllamaClient.new()
@@ -35,7 +42,12 @@ signal chat_cancelled(partial_text: String)
 signal chat_error(message: String)
 
 ## Адрес сервера. Можно указать порт и путь: "http://192.168.1.10:11434".
+## Для OpenAI-совместимого провайдера — вместе с версией: "https://ollama.com/v1".
 var host: String = "http://localhost:11434"
+## Провайдер: "ollama" — локальный сервер, "openai" — OpenAI-совместимый API.
+var provider: String = "ollama"
+## API-ключ для OpenAI-совместимого провайдера (для локального Ollama не нужен).
+var api_key: String = ""
 ## Имя модели, например "llama3.2" или "qwen2.5-coder:7b".
 var model: String = ""
 ## Температура сэмплирования (0.0 — строго, 1.0+ — креативно).
@@ -97,12 +109,17 @@ func _ensure_req() -> void:
 
 ## Запросить список моделей. Ответ придёт в models_loaded / models_error.
 func fetch_models() -> void:
-	_plain_request("models", HTTPClient.METHOD_GET, "/api/tags")
+	_plain_request("models", HTTPClient.METHOD_GET, "/models" if is_openai() else "/api/tags")
 
 
-## Проверить, что сервер Ollama доступен. Ответ в connection_checked.
+## Проверить, что сервер доступен. Ответ в connection_checked.
 func check_connection() -> void:
-	_plain_request("version", HTTPClient.METHOD_GET, "/api/version")
+	_plain_request("version", HTTPClient.METHOD_GET, "/models" if is_openai() else "/api/version")
+
+
+## Работаем с OpenAI-совместимым API (а не с «родным» API Ollama).
+func is_openai() -> bool:
+	return provider == "openai"
 
 
 ## Отправить историю сообщений модели.
@@ -116,13 +133,7 @@ func send_chat(messages: Array, p_model: String = "") -> void:
 	if _busy:
 		return
 
-	var payload := {
-		"model": model,
-		"messages": _with_system(messages),
-		"stream": stream,
-		"options": {"temperature": temperature},
-		"keep_alive": keep_alive,
-	}
+	var payload := _build_payload(messages)
 	_busy = true
 	_acc = ""
 	_stats = {}
@@ -132,7 +143,8 @@ func send_chat(messages: Array, p_model: String = "") -> void:
 	if stream:
 		_start_stream(payload)
 	else:
-		_plain_request("chat", HTTPClient.METHOD_POST, "/api/chat", payload)
+		_plain_request("chat", HTTPClient.METHOD_POST,
+			"/chat/completions" if is_openai() else "/api/chat", payload)
 		chat_started.emit()
 
 
@@ -186,8 +198,8 @@ func _process(delta: float) -> void:
 				HTTPClient.STATUS_CONNECTED:
 					var err := _http.request(
 						HTTPClient.METHOD_POST,
-						_base_path + "/api/chat",
-						PackedStringArray(["Content-Type: application/json", "Accept: application/x-ndjson"]),
+						_base_path + ("/chat/completions" if is_openai() else "/api/chat"),
+						_stream_headers(),
 						_body)
 					if err != OK:
 						_fail("Не удалось отправить запрос (код %d)." % err)
@@ -197,7 +209,7 @@ func _process(delta: float) -> void:
 				HTTPClient.STATUS_CANT_RESOLVE:
 					_fail("Не удалось разрешить адрес «%s». Проверьте имя хоста." % _addr)
 				HTTPClient.STATUS_CANT_CONNECT:
-					_fail("Ollama не отвечает на %s. Запущен ли сервер? Используйте «ollama serve»." % host)
+					_fail("%s не отвечает на %s. %s" % [_server_name(), host, _offline_hint()])
 				HTTPClient.STATUS_CONNECTION_ERROR:
 					_fail("Ошибка соединения с %s." % host)
 				HTTPClient.STATUS_TLS_HANDSHAKE_ERROR:
@@ -234,13 +246,42 @@ func _consume(text: String) -> void:
 
 
 func _handle_line(line: String) -> void:
-	var parsed: Variant = JSON.parse_string(line)
+	var text := line
+	if is_openai():
+		# формат Server-Sent Events: "data: {...}" и завершающее "data: [DONE]"
+		if text.begins_with(":") or text.begins_with("event:"):
+			return
+		if text.begins_with("data:"):
+			text = text.substr(5).strip_edges()
+		if text.is_empty() or text == "[DONE]":
+			return
+
+	var parsed: Variant = JSON.parse_string(text)
 	if typeof(parsed) != TYPE_DICTIONARY:
 		return
 	var data: Dictionary = parsed
 
 	if data.has("error"):
-		_fail(str(data["error"]))
+		_fail(_error_for_code(_http_code, _error_text(data["error"])))
+		return
+
+	if is_openai():
+		var choices: Variant = data.get("choices", [])
+		if typeof(choices) == TYPE_ARRAY and not choices.is_empty():
+			var first: Variant = choices[0]
+			if typeof(first) == TYPE_DICTIONARY:
+				var piece := ""
+				var delta: Variant = first.get("delta", {})
+				if typeof(delta) == TYPE_DICTIONARY:
+					piece = str(delta.get("content", ""))
+				if piece.is_empty():
+					var message: Variant = first.get("message", {})
+					if typeof(message) == TYPE_DICTIONARY:
+						piece = str(message.get("content", ""))
+				if not piece.is_empty():
+					_acc += piece
+					chat_delta.emit(piece)
+		_merge_usage(data)
 		return
 
 	var msg: Variant = data.get("message", {})
@@ -268,7 +309,7 @@ func _finish_stream() -> void:
 		return
 
 	if _http_code != 0 and (_http_code < 200 or _http_code >= 300):
-		_fail("HTTP %d от сервера Ollama." % _http_code)
+		_fail("HTTP %d от сервера (%s)." % [_http_code, host])
 		return
 
 	if _acc.strip_edges().is_empty():
@@ -290,7 +331,7 @@ func _plain_request(op: String, method: int, path: String, payload: Dictionary =
 		_req.cancel_request()
 	_req_op = op
 	_req.timeout = request_timeout
-	var headers := PackedStringArray(["Content-Type: application/json"])
+	var headers := _headers()
 	var url := host.strip_edges().trim_suffix("/") + path
 	var err := OK
 	if method == HTTPClient.METHOD_GET:
@@ -309,7 +350,7 @@ func _on_request_completed(result: int, code: int, _headers: PackedStringArray, 
 		var msg := "Ошибка запроса (%d)." % result
 		match result:
 			HTTPRequest.RESULT_CANT_CONNECT:
-				msg = "Ollama недоступен по адресу %s. Запущен ли сервер? Используйте «ollama serve»." % host
+				msg = "%s недоступен по адресу %s. %s" % [_server_name(), host, _offline_hint()]
 			HTTPRequest.RESULT_CANT_RESOLVE:
 				msg = "Не удалось разрешить адрес «%s»." % host
 			HTTPRequest.RESULT_CONNECTION_ERROR:
@@ -327,8 +368,8 @@ func _on_request_completed(result: int, code: int, _headers: PackedStringArray, 
 	if code < 200 or code >= 300:
 		var detail := "HTTP %d" % code
 		if typeof(parsed) == TYPE_DICTIONARY and parsed.has("error"):
-			detail = str(parsed["error"])
-		_emit_error(op, detail)
+			detail = _error_text(parsed["error"])
+		_emit_error(op, _error_for_code(code, detail))
 		return
 
 	if typeof(parsed) != TYPE_DICTIONARY:
@@ -339,9 +380,15 @@ func _on_request_completed(result: int, code: int, _headers: PackedStringArray, 
 	match op:
 		"models":
 			var names: Array = []
-			for m in data.get("models", []):
-				if typeof(m) == TYPE_DICTIONARY and m.has("name"):
-					names.append(str(m["name"]))
+			if is_openai():
+				for m in data.get("data", []):
+					if typeof(m) == TYPE_DICTIONARY and m.has("id"):
+						names.append(str(m["id"]))
+				names.sort()
+			else:
+				for m in data.get("models", []):
+					if typeof(m) == TYPE_DICTIONARY and m.has("name"):
+						names.append(str(m["name"]))
 			models_loaded.emit(names)
 
 		"version":
@@ -349,11 +396,9 @@ func _on_request_completed(result: int, code: int, _headers: PackedStringArray, 
 
 		"chat":
 			_busy = false
-			var msg: Variant = data.get("message", {})
-			_acc = ""
-			if typeof(msg) == TYPE_DICTIONARY:
-				_acc = str(msg.get("content", ""))
+			_acc = _extract_content(data)
 			_stats = _extract_stats(data)
+			_merge_usage(data)
 			if _acc.strip_edges().is_empty():
 				chat_error.emit("Модель вернула пустой ответ.")
 			else:
@@ -381,6 +426,107 @@ func _fail(message: String) -> void:
 	_phase = Phase.IDLE
 	_stream_failed = true
 	chat_error.emit(message)
+
+
+## Тело запроса: у Ollama свои поля (options, keep_alive), у OpenAI-совместимых — плоские.
+func _build_payload(messages: Array) -> Dictionary:
+	if is_openai():
+		return {
+			"model": model,
+			"messages": _with_system(messages),
+			"stream": stream,
+			"temperature": temperature,
+		}
+	return {
+		"model": model,
+		"messages": _with_system(messages),
+		"stream": stream,
+		"options": {"temperature": temperature},
+		"keep_alive": keep_alive,
+	}
+
+
+## Заголовки обычного запроса. Для облака добавляется ключ.
+func _headers() -> PackedStringArray:
+	var headers := PackedStringArray(["Content-Type: application/json"])
+	var key := api_key.strip_edges()
+	if is_openai() and not key.is_empty():
+		headers.append("Authorization: Bearer " + key)
+	return headers
+
+
+## Заголовки потокового запроса: формат ответа зависит от провайдера.
+func _stream_headers() -> PackedStringArray:
+	var headers := _headers()
+	headers.append("Accept: text/event-stream" if is_openai() else "Accept: application/x-ndjson")
+	return headers
+
+
+## Понятный текст для типичных кодов ошибок облачного API.
+func _error_for_code(code: int, fallback: String) -> String:
+	if not is_openai():
+		return fallback
+	match code:
+		401:
+			return "Неверный API-ключ (HTTP 401). Проверьте ключ в настройках."
+		403:
+			return "Доступ запрещён (HTTP 403). Проверьте ключ и права аккаунта."
+		429:
+			return "Слишком много запросов (HTTP 429). Подождите немного и повторите."
+	return fallback
+
+
+## Текст ошибки из ответа сервера: строка или {"error": {"message": …}}.
+func _error_text(value: Variant) -> String:
+	if typeof(value) == TYPE_DICTIONARY:
+		var data: Dictionary = value
+		if data.has("message"):
+			return str(data["message"])
+		if data.has("error"):
+			return str(data["error"])
+		return JSON.stringify(data)
+	return str(value)
+
+
+## Текст ответа из JSON (разные форматы у Ollama и OpenAI-совместимых API).
+func _extract_content(data: Dictionary) -> String:
+	if is_openai():
+		var choices: Variant = data.get("choices", [])
+		if typeof(choices) == TYPE_ARRAY and not choices.is_empty():
+			var first: Variant = choices[0]
+			if typeof(first) == TYPE_DICTIONARY:
+				var message: Variant = first.get("message", {})
+				if typeof(message) == TYPE_DICTIONARY:
+					return str(message.get("content", ""))
+		return ""
+	var msg: Variant = data.get("message", {})
+	if typeof(msg) == TYPE_DICTIONARY:
+		return str(msg.get("content", ""))
+	return ""
+
+
+## Статистика из блока usage (OpenAI-совместимые API).
+func _merge_usage(data: Dictionary) -> void:
+	var usage: Variant = data.get("usage", {})
+	if typeof(usage) != TYPE_DICTIONARY:
+		return
+	var counts: Dictionary = usage
+	if counts.has("completion_tokens"):
+		_stats["eval_count"] = int(counts["completion_tokens"])
+	if counts.has("prompt_tokens"):
+		_stats["prompt_tokens"] = int(counts["prompt_tokens"])
+
+
+## Как называть сервер в сообщениях об ошибках.
+func _server_name() -> String:
+	return "Сервер" if is_openai() else "Ollama"
+
+
+## Подсказка, что делать, если сервер не отвечает.
+func _offline_hint() -> String:
+	if is_openai():
+		return "Проверьте адрес API (он должен заканчиваться на /v1), ключ и интернет."
+	return "Запущен ли сервер? Используйте «ollama serve»."
 
 
 ## Копия истории с системным промптом в начале (если он задан).

@@ -161,7 +161,17 @@ layout_mode = 2
 theme_type_variation = &"SectionLabel"
 text = "НАСТРОЙКИ"
 
+[node name="ProviderLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+text = "Провайдер"
+
+[node name="ProviderOption" type="OptionButton" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+unique_name_in_owner = true
+layout_mode = 2
+
 [node name="HostLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"DimLabel"
 text = "Адрес сервера Ollama"
@@ -170,6 +180,25 @@ text = "Адрес сервера Ollama"
 unique_name_in_owner = true
 layout_mode = 2
 text = "http://localhost:11434"
+
+[node name="ApiKeyLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+text = "API-ключ"
+
+[node name="ApiKeyEdit" type="LineEdit" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+unique_name_in_owner = true
+layout_mode = 2
+secret = true
+placeholder_text = "для облака: ключ Ollama, OpenAI, Groq…"
+
+[node name="ProviderHint" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+text = "Ключ хранится только локально (user://ollama_chat.cfg)."
+autowrap_mode = 3
 
 [node name="SysLabel" type="Label" parent="Layout/Sidebar/SidebarMargin/SidebarScroll/SidebarBox"]
 layout_mode = 2
