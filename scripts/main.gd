@@ -25,6 +25,9 @@ const PLAIN_MODE_HINT := "Модель настраивается один ра�
 ## Провайдеры: локальный Ollama или любой OpenAI-совместимый API.
 const PROVIDERS := ["ollama", "openai"]
 const PROVIDER_LABELS := ["Ollama (локально)", "OpenAI-совместимый API"]
+const TABS := ["chats", "models", "settings"]
+const DEFAULT_WINDOW_SIZE := Vector2i(1180, 800)
+const MIN_WINDOW_SIZE := Vector2i(980, 620)
 const DEFAULT_HOSTS := {
 	"ollama": "http://localhost:11434",
 	"openai": "https://ollama.com/v1",
@@ -39,6 +42,14 @@ const DEFAULT_HOSTS := {
 @onready var _edit_persona_btn: Button = %EditPersonaBtn
 @onready var _persona_hint: Label = %PersonaHint
 @onready var _model_list: ItemList = %ModelList
+@onready var _tab_chats: Button = %ChatsTab
+@onready var _tab_models: Button = %ModelsTab
+@onready var _tab_settings: Button = %SettingsTab
+@onready var _page_chats: VBoxContainer = %ChatsPage
+@onready var _page_models: VBoxContainer = %ModelsPage
+@onready var _page_settings: VBoxContainer = %SettingsPage
+@onready var _maximized_check: CheckBox = %MaximizedCheck
+@onready var _reset_window_btn: Button = %ResetWindowBtn
 @onready var _provider_option: OptionButton = %ProviderOption
 @onready var _host_label: Label = %HostLabel
 @onready var _host_edit: LineEdit = %HostEdit
@@ -78,6 +89,11 @@ var _version: String = ""
 var _saved_model: String = ""
 ## Адрес, запомненный для каждого провайдера: у локального и облачного он разный.
 var _provider_hosts: Dictionary = DEFAULT_HOSTS.duplicate()
+## Какая вкладка сайдбара открыта: "chats", "models" или "settings".
+var _tab: String = "chats"
+## Последний «обычный» размер и положение окна (для восстановления после F11 и F5).
+var _window_size: Vector2i = DEFAULT_WINDOW_SIZE
+var _window_position: Vector2i = Vector2i(-1, -1)
 var _hint_token: int = 0
 
 
@@ -96,6 +112,7 @@ func _ready() -> void:
 	client.chat_error.connect(_on_chat_error)
 
 	_wire_events()
+	_setup_tabs()
 	_setup_provider_ui()
 	_setup_personas()
 	_setup_chats()
@@ -105,6 +122,7 @@ func _ready() -> void:
 	_restore_chat()
 	_input.grab_focus()
 	_check_connection()
+	call_deferred("_apply_window_settings")
 
 
 func _wire_events() -> void:
@@ -123,6 +141,17 @@ func _wire_events() -> void:
 	_send_btn.pressed.connect(_send)
 	_stop_btn.pressed.connect(_stop)
 	_model_list.item_selected.connect(_on_model_selected)
+	_tab_chats.toggled.connect(func(on: bool) -> void:
+		if on:
+			_select_tab("chats"))
+	_tab_models.toggled.connect(func(on: bool) -> void:
+		if on:
+			_select_tab("models"))
+	_tab_settings.toggled.connect(func(on: bool) -> void:
+		if on:
+			_select_tab("settings"))
+	_maximized_check.toggled.connect(_on_maximize_toggled)
+	_reset_window_btn.pressed.connect(_on_reset_window_pressed)
 	_provider_option.item_selected.connect(_on_provider_selected)
 	_host_edit.text_submitted.connect(func(_t: String) -> void: _apply_host())
 	_host_edit.focus_exited.connect(_apply_host)
@@ -133,6 +162,30 @@ func _wire_events() -> void:
 	_system_prompt.focus_exited.connect(_save_settings)
 	_input.gui_input.connect(_on_input_gui_input)
 	_input.text_changed.connect(_on_input_text_changed)
+
+
+# ------------------------------------------------------------------ вкладки сайдбара
+
+func _setup_tabs() -> void:
+	var group := ButtonGroup.new()
+	_tab_chats.button_group = group
+	_tab_models.button_group = group
+	_tab_settings.button_group = group
+
+
+## Показать одну из вкладок: «Диалоги», «Модели» или «Настройки».
+func _select_tab(tab: String, save: bool = true) -> void:
+	if not TABS.has(tab):
+		tab = "chats"
+	_tab = tab
+	_page_chats.visible = tab == "chats"
+	_page_models.visible = tab == "models"
+	_page_settings.visible = tab == "settings"
+	_tab_chats.set_pressed_no_signal(tab == "chats")
+	_tab_models.set_pressed_no_signal(tab == "models")
+	_tab_settings.set_pressed_no_signal(tab == "settings")
+	if save:
+		_save_settings()
 
 
 # ------------------------------------------------------------------ переписки
@@ -538,6 +591,8 @@ func _refresh_persona_hint() -> void:
 func _open_persona_editor(persona_id: String) -> void:
 	if _persona_editor == null:
 		return
+	if _tab != "models":
+		_select_tab("models")
 	if _busy:
 		_show_toast("Дождитесь ответа модели или нажмите «Стоп».", "error")
 		return
@@ -1001,6 +1056,14 @@ func _load_settings() -> void:
 	_temp_slider.set_value_no_signal(float(cfg.get_value("chat", "temperature", 0.8)))
 	_temp_value.text = "%.2f" % _temp_slider.value
 	_stream_check.set_pressed_no_signal(bool(cfg.get_value("chat", "stream", true)))
+	_maximized_check.set_pressed_no_signal(bool(cfg.get_value("window", "maximized", false)))
+	var stored_size: Variant = cfg.get_value("window", "size", null)
+	if typeof(stored_size) == TYPE_VECTOR2I:
+		_window_size = stored_size
+	var stored_pos: Variant = cfg.get_value("window", "position", null)
+	if typeof(stored_pos) == TYPE_VECTOR2I:
+		_window_position = stored_pos
+	_select_tab(str(cfg.get_value("ui", "tab", "chats")), false)
 
 
 func _save_settings() -> void:
@@ -1017,6 +1080,11 @@ func _save_settings() -> void:
 	cfg.set_value("chat", "system_prompt", _system_prompt.text)
 	cfg.set_value("chat", "temperature", float(_temp_slider.value))
 	cfg.set_value("chat", "stream", _stream_check.button_pressed)
+	cfg.set_value("ui", "tab", _tab)
+	cfg.set_value("window", "maximized", _maximized_check.button_pressed)
+	if not _is_headless():
+		cfg.set_value("window", "size", _window_size)
+		cfg.set_value("window", "position", _window_position)
 	cfg.save(SETTINGS_PATH)
 
 
@@ -1025,7 +1093,85 @@ func _on_temperature_changed(value: float) -> void:
 	_save_settings()
 
 
+# ------------------------------------------------------------------ окно
+
+func _is_headless() -> bool:
+	return DisplayServer.get_name() == "headless"
+
+
+## Восстановить размер и положение окна при запуске.
+func _apply_window_settings() -> void:
+	if _is_headless():
+		return
+	DisplayServer.window_set_min_size(MIN_WINDOW_SIZE)
+	if _maximized_check.button_pressed:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MAXIMIZED)
+		return
+	DisplayServer.window_set_size(_window_size)
+	if _window_position != Vector2i(-1, -1):
+		DisplayServer.window_set_position(_window_position)
+
+
+func _on_maximize_toggled(pressed: bool) -> void:
+	_save_settings()
+	if _is_headless():
+		return
+	if pressed:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MAXIMIZED)
+	else:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		DisplayServer.window_set_size(_window_size)
+		if _window_position != Vector2i(-1, -1):
+			DisplayServer.window_set_position(_window_position)
+
+
+func _on_reset_window_pressed() -> void:
+	_window_size = DEFAULT_WINDOW_SIZE
+	_maximized_check.set_pressed_no_signal(false)
+	if not _is_headless():
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		DisplayServer.window_set_size(DEFAULT_WINDOW_SIZE)
+		_center_window()
+	_save_settings()
+	_show_toast("Размер окна сброшен.", "info")
+
+
+func _center_window() -> void:
+	if _is_headless():
+		return
+	var screen := DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen())
+	_window_position = screen.position + (screen.size - _window_size) / 2
+	DisplayServer.window_set_position(_window_position)
+
+
+## F11 — во весь экран и обратно.
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not (event is InputEventKey):
+		return
+	var key := event as InputEventKey
+	if not key.pressed or key.echo or key.keycode != KEY_F11:
+		return
+	get_viewport().set_input_as_handled()
+	if _is_headless():
+		return
+	var mode := DisplayServer.window_get_mode()
+	if mode == DisplayServer.WINDOW_MODE_FULLSCREEN or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		DisplayServer.window_set_size(_window_size)
+		if _window_position != Vector2i(-1, -1):
+			DisplayServer.window_set_position(_window_position)
+	else:
+		_window_size = DisplayServer.window_get_size()
+		_window_position = DisplayServer.window_get_position()
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST and is_node_ready():
 		_persist_current_chat()
 		_save_settings()
+	elif what == NOTIFICATION_WM_SIZE_CHANGED and is_node_ready() and not _is_headless():
+		# запоминаем «обычный» размер, чтобы вернуться к нему из полного экрана
+		if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_WINDOWED:
+			_window_size = DisplayServer.window_get_size()
+			_window_position = DisplayServer.window_get_position()

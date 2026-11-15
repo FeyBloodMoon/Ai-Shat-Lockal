@@ -107,6 +107,34 @@ static func build() -> Theme:
 	t.set_color("font_pressed_color", "CardButton", Color.WHITE)
 	t.set_font_size("font_size", "CardButton", 16)
 
+	# --- вкладки сайдбара (Диалоги / Модели / Настройки)
+	t.set_type_variation("TabButton", "Button")
+	var tab_normal := _box(Color(0, 0, 0, 0), 8)
+	tab_normal.content_margin_left = 6
+	tab_normal.content_margin_right = 6
+	tab_normal.content_margin_top = 6
+	tab_normal.content_margin_bottom = 6
+	t.set_stylebox("normal", "TabButton", tab_normal)
+	var tab_hover := _box(PANEL_ALT, 8, BORDER, 1)
+	tab_hover.content_margin_left = 6
+	tab_hover.content_margin_right = 6
+	tab_hover.content_margin_top = 6
+	tab_hover.content_margin_bottom = 6
+	t.set_stylebox("hover", "TabButton", tab_hover)
+	var tab_pressed := _box(ACCENT.darkened(0.45), 8, ACCENT, 1)
+	tab_pressed.content_margin_left = 6
+	tab_pressed.content_margin_right = 6
+	tab_pressed.content_margin_top = 6
+	tab_pressed.content_margin_bottom = 6
+	t.set_stylebox("pressed", "TabButton", tab_pressed)
+	t.set_stylebox("hover_pressed", "TabButton", _box(ACCENT.darkened(0.35), 8, ACCENT, 1))
+	t.set_stylebox("focus", "TabButton", StyleBoxEmpty.new())
+	t.set_color("font_color", "TabButton", DIM)
+	t.set_color("font_hover_color", "TabButton", TEXT)
+	t.set_color("font_pressed_color", "TabButton", Color.WHITE)
+	t.set_color("font_hover_pressed_color", "TabButton", Color.WHITE)
+	t.set_font_size("font_size", "TabButton", 13)
+
 	# --- «Удалить»
 	t.set_type_variation("DangerButton", "Button")
 	t.set_stylebox("normal", "DangerButton", _box(Color("#3a1d22"), 8, ERROR, 1))
