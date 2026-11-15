@@ -51,6 +51,7 @@ func _run() -> void:
 	_check(ui._persona_editor.visible, "старт: «+ Создать персонажа» открывает форму")
 	ui._persona_editor.cancel_btn.pressed.emit()
 	await process_frame
+	_check(_page(ui, "ModelsPage").visible, "старт: форма персонажа уводит на вкладку «Модели»")
 	start.model_buttons["llama3.2:latest"].pressed.emit()
 	await process_frame
 	_check(not start.visible and bool(ui.get_node("%ChatScroll").visible),
@@ -59,6 +60,41 @@ func _run() -> void:
 	ui._new_chat(true)
 	await process_frame
 	_check(bool(ui.get_node("%StartScreen").visible), "старт: «+ Диалог» снова показывает выбор")
+
+	# --- вкладки сайдбара: диалоги, модели, настройки
+	var tab_chats: Button = ui.get_node("%ChatsTab")
+	var tab_models: Button = ui.get_node("%ModelsTab")
+	var tab_settings: Button = ui.get_node("%SettingsTab")
+	tab_chats.button_pressed = true
+	await process_frame
+	_check(_page(ui, "ChatsPage").visible and not _page(ui, "ModelsPage").visible,
+		"вкладки: «Диалоги» открываются")
+	_check(tab_settings.size.x > 40.0, "вкладки: кнопки вкладок в layout (%.0f)" % tab_settings.size.x)
+	tab_models.button_pressed = true
+	await process_frame
+	_check(_page(ui, "ModelsPage").visible and not _page(ui, "ChatsPage").visible,
+		"вкладки: «Модели» открылись")
+	_check(not tab_chats.button_pressed, "вкладки: активна только одна")
+	_check(ui.get_node("%PersonaList").is_visible_in_tree(), "вкладки: персонажи на месте")
+	tab_settings.button_pressed = true
+	await process_frame
+	_check(_page(ui, "SettingsPage").visible, "вкладки: «Настройки» открылись")
+	_check(ui.get_node("%ProviderOption").is_visible_in_tree(), "вкладки: провайдер на месте")
+	_check(not ui.get_node("%ModelList").is_visible_in_tree(), "вкладки: чужие страницы скрыты")
+	tab_chats.button_pressed = true
+	await process_frame
+	_check(_page(ui, "ChatsPage").visible, "вкладки: вернулись к «Диалогам»")
+
+	# --- окно: развернуть при запуске / сбросить размер
+	var maximized: CheckBox = ui.get_node("%MaximizedCheck")
+	_check(maximized != null, "окно: настройка «развёрнутым» есть")
+	maximized.button_pressed = true
+	await process_frame
+	_check(bool(ui._maximized_check.button_pressed), "окно: галочка включилась")
+	ui.get_node("%ResetWindowBtn").pressed.emit()
+	await process_frame
+	_check(not bool(ui._maximized_check.button_pressed), "окно: сброс снимает разворот")
+	_check(ui._window_size == Vector2i(1180, 800), "окно: размер вернулся к 1180x800")
 
 	# --- провайдер: локальный Ollama ↔ OpenAI-совместимый API (/v1)
 	var provider_option: OptionButton = ui.get_node("%ProviderOption")
@@ -283,6 +319,11 @@ func _test_chats(ui: Control, input: TextEdit) -> void:
 	_check(bool(ui.get_node("%StartScreen").visible), "переписки: экран выбора вернулся")
 	_check(delete_btn.text == "Удалить", "переписки: кнопка удаления сброшена")
 
+	# вкладка сайдбара запоминается между запусками
+	ui._select_tab("settings")
+	await process_frame
+	_check(ui.get_node("%SettingsPage").visible, "вкладки: перед перезапуском открыты «Настройки»")
+
 	# перезапуск: сначала экран выбора, переписка — по «Продолжить» или из списка
 	ui.queue_free()
 	await process_frame
@@ -295,6 +336,10 @@ func _test_chats(ui: Control, input: TextEdit) -> void:
 	_check(models_ready, "перезапуск: модели подтянулись")
 	await process_frame
 	_check(again.chats.count() == 1, "перезапуск: переписка найдена (%d)" % again.chats.count())
+	_check(again.get_node("%SettingsPage").visible, "перезапуск: вкладка «Настройки» вспомнилась")
+	again._select_tab("chats")
+	await process_frame
+	_check(again.get_node("%ChatsPage").visible, "перезапуск: вернулись к «Диалогам»")
 	var again_start = again.get_node("%StartScreen")
 	_check(again_start.visible, "перезапуск: открыт экран выбора")
 	_check(again.history.is_empty(), "перезапуск: чат сразу не открывается")
@@ -309,6 +354,10 @@ func _test_chats(ui: Control, input: TextEdit) -> void:
 	_check(again.get_node("%ChatList").item_count == 1, "перезапуск: строка в списке")
 	_check(not again._current_chat_id.is_empty(), "перезапуск: переписка выбрана")
 	_check(not again_start.visible, "перезапуск: экран выбора закрылся")
+
+
+func _page(ui: Control, name: String) -> Control:
+	return ui.get_node("%" + name)
 
 
 func _option_index(option: OptionButton, text: String) -> int:
