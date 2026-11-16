@@ -19,9 +19,10 @@ signal cancelled()
 
 const Personas = preload("res://scripts/personas.gd")
 
-## Поля доступны снаружи (и тестам): name_edit, base_option, trait_buttons…
+## Поля доступны снаружи (и тестам): name_edit, base_option, trait_buttons, custom_trait_edit…
 var name_edit: LineEdit
 var base_option: OptionButton
+var custom_trait_edit: LineEdit
 var error_label: Label
 var preview_label: RichTextLabel
 var save_btn: Button
@@ -56,6 +57,7 @@ func open_new(models: Array, default_model: String = "", taken_names: Array = []
 	name_edit.text = ""
 	name_edit.placeholder_text = "Например: Бородач"
 	_clear_traits()
+	custom_trait_edit.text = ""
 	_fill_models(models, default_model)
 	_show()
 
@@ -75,6 +77,7 @@ func open_edit(persona: Dictionary, models: Array, taken_names: Array = []) -> v
 		var button: Button = trait_buttons.get(str(id))
 		if button != null:
 			button.set_pressed_no_signal(true)
+	custom_trait_edit.text = str(persona.get("custom_trait", ""))
 	_fill_models(models, str(persona.get("base_model", "")))
 	_show()
 	name_edit.select_all()
@@ -120,18 +123,18 @@ func _build() -> void:
 
 	var panel := PanelContainer.new()
 	panel.theme_type_variation = &"DialogPanel"
-	panel.custom_minimum_size = Vector2(600, 0)
+	panel.custom_minimum_size = Vector2(620, 0)
 	center.add_child(panel)
 
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 20)
 	margin.add_theme_constant_override("margin_right", 20)
-	margin.add_theme_constant_override("margin_top", 16)
-	margin.add_theme_constant_override("margin_bottom", 16)
+	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_bottom", 14)
 	panel.add_child(margin)
 
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 8)
+	box.add_theme_constant_override("separation", 7)
 	margin.add_child(box)
 
 	_title = Label.new()
@@ -160,17 +163,25 @@ func _build() -> void:
 	box.add_child(traits_hint)
 
 	var grid := GridContainer.new()
-	grid.columns = 2
+	grid.columns = 3
 	grid.add_theme_constant_override("h_separation", 6)
 	grid.add_theme_constant_override("v_separation", 6)
 	box.add_child(grid)
 	_build_trait_buttons(grid)
 
+	box.add_child(_section_label("СВОЙ ТЕМПЕРАМЕНТ"))
+	custom_trait_edit = LineEdit.new()
+	custom_trait_edit.placeholder_text = "Впишите всё, что нужно: роль, манеру речи, привычки, свои правила…"
+	custom_trait_edit.clear_button_enabled = true
+	custom_trait_edit.text_changed.connect(func(_text: String) -> void: _update_preview())
+	custom_trait_edit.text_submitted.connect(func(_text: String) -> void: _submit())
+	box.add_child(custom_trait_edit)
+
 	box.add_child(_section_label("СИСТЕМНЫЙ ПРОМПТ — ПРЕДПРОСМОТР"))
 	preview_label = RichTextLabel.new()
 	preview_label.bbcode_enabled = false
 	preview_label.scroll_active = true
-	preview_label.custom_minimum_size = Vector2(0, 96)
+	preview_label.custom_minimum_size = Vector2(0, 84)
 	preview_label.add_theme_font_size_override("normal_font_size", 12)
 	preview_label.add_theme_color_override("default_color", Color("#8b97a8"))
 	box.add_child(preview_label)
@@ -310,6 +321,12 @@ func _pressed_traits() -> Array:
 	return out
 
 
+func _custom_trait_text() -> String:
+	if custom_trait_edit == null:
+		return ""
+	return custom_trait_edit.text.strip_edges()
+
+
 func _update_preview() -> void:
 	if preview_label == null:
 		return
@@ -320,6 +337,7 @@ func _update_preview() -> void:
 		"name": preview_name,
 		"base_model": _selected_base(),
 		"traits": _pressed_traits(),
+		"custom_trait": _custom_trait_text(),
 	})
 
 
@@ -346,6 +364,7 @@ func _submit() -> void:
 		"name": persona_name,
 		"base_model": base,
 		"traits": _pressed_traits(),
+		"custom_trait": _custom_trait_text(),
 	}
 	if not _persona.is_empty():
 		data["id"] = str(_persona.get("id", ""))
