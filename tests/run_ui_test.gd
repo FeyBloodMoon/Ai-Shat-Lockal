@@ -394,15 +394,19 @@ func _test_personas(ui: Control, input: TextEdit, model_list: ItemList) -> void:
 	await process_frame
 	_check(editor.visible and editor.error_label.visible, "редактор: без имени не сохраняет")
 
-	# --- имя + основа + темперамент
+	# --- имя + основа + темперамент + свой темперамент
 	editor.name_edit.text = "Бородач"
 	var base_index := _option_index(editor.base_option, "qwen2.5-coder:7b")
 	editor.base_option.select(base_index)
 	editor.base_option.item_selected.emit(base_index)
 	editor.trait_buttons["friendly"].button_pressed = true
 	editor.trait_buttons["brief"].button_pressed = true
+	editor.custom_trait_edit.text = "Любишь байки про старые серверы"
+	editor.custom_trait_edit.text_changed.emit(editor.custom_trait_edit.text)
 	_check(editor.preview_label.text.contains("Бородач"), "редактор: предпросмотр знает имя")
 	_check(editor.preview_label.text.contains("дружелюбно"), "редактор: предпросмотр знает темперамент")
+	_check(editor.preview_label.text.contains("Любишь байки про старые серверы"),
+		"редактор: предпросмотр включает свой темперамент")
 
 	# --- тон — взаимоисключающие кнопки
 	editor.trait_buttons["sarcastic"].button_pressed = true
@@ -414,12 +418,16 @@ func _test_personas(ui: Control, input: TextEdit, model_list: ItemList) -> void:
 	await process_frame
 	_check(not editor.visible, "редактор: закрылся после сохранения")
 	_check(ui.personas.count() == 1, "персонажи: сохранено 1 (%d)" % ui.personas.count())
+	_check(str(ui.personas.items[0].get("custom_trait", "")) == "Любишь байки про старые серверы",
+		"персонажи: свой темперамент сохранён")
 	_check(persona_list.item_count == 2, "персонажи: «без персонажа» + своя модель")
 	_check(persona_list.get_item_text(1).contains("Бородач"), "персонажи: имя в списке")
 	_check(ui.get_node("%ModelBadge").text.contains("Бородач"),
 		"персонажи: бейдж показывает персонажа (%s)" % ui.get_node("%ModelBadge").text)
 	_check(ui.get_node("%PersonaHint").text.contains("Дружелюбный"),
 		"персонажи: подпись показывает темперамент")
+	_check(ui.get_node("%PersonaHint").text.contains("Любишь байки"),
+		"персонажи: подпись включает свой темперамент")
 	_check(ui.client.model == "qwen2.5-coder:7b", "персонажи: клиент переключён на основу")
 
 	# --- персонаж доступен на стартовом экране
@@ -452,20 +460,27 @@ func _test_personas(ui: Control, input: TextEdit, model_list: ItemList) -> void:
 		var system_text := str(sent[0].get("content", ""))
 		_check(system_text.contains(persona_name), "персонажи: в промпте имя")
 		_check(system_text.contains("дружелюбно"), "персонажи: в промпте темперамент")
+		_check(system_text.contains("Любишь байки про старые серверы"),
+			"персонажи: в промпте свой темперамент")
 
 	# --- правка: меняем темперамент, второй персонаж не появляется
 	ui._open_persona_editor(persona_id)
 	await process_frame
 	_check(editor.name_edit.text == persona_name, "редактор: имя подставилось")
 	_check(editor.trait_buttons["friendly"].button_pressed, "редактор: кнопки вернулись нажатыми")
+	_check(editor.custom_trait_edit.text == "Любишь байки про старые серверы",
+		"редактор: свой темперамент подставился")
 	_check(editor.delete_btn.visible, "редактор: «Удалить» видна при правке")
 	editor.trait_buttons["friendly"].button_pressed = false
 	editor.trait_buttons["sarcastic"].button_pressed = true
+	editor.custom_trait_edit.text = "Отвечай с лёгким пиратским акцентом"
 	editor.save_btn.pressed.emit()
 	await process_frame
 	_check(ui.personas.count() == 1, "редактор: правка не создала второго")
 	_check(ui.personas.items[0].get("traits", []) == ["sarcastic", "brief"],
 		"редактор: темперамент обновлён (%s)" % [ui.personas.items[0].get("traits", [])])
+	_check(str(ui.personas.items[0].get("custom_trait", "")) == "Отвечай с лёгким пиратским акцентом",
+		"редактор: свой темперамент обновлён")
 
 	# --- переключение «персонаж ↔ без персонажа»
 	persona_list.select(0)

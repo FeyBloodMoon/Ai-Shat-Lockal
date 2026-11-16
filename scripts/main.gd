@@ -620,18 +620,19 @@ func _on_persona_saved(data: Dictionary) -> void:
 	var persona_name := str(data.get("name", "")).strip_edges()
 	var base := str(data.get("base_model", "")).strip_edges()
 	var traits: Array = data.get("traits", [])
+	var custom_trait := str(data.get("custom_trait", "")).strip_edges()
 	var persona_id := str(data.get("id", ""))
 	var message := ""
 
 	if persona_id.is_empty():
-		var created := personas.add(persona_name, base, traits)
+		var created := personas.add(persona_name, base, traits, custom_trait)
 		if created.is_empty():
 			_show_toast("Не удалось создать модель: пустое имя.", "error")
 			return
 		persona_id = str(created.get("id", ""))
 		message = "Модель «%s» создана · основа %s." % [persona_name, base]
 	else:
-		if not personas.update_persona(persona_id, persona_name, base, traits):
+		if not personas.update_persona(persona_id, persona_name, base, traits, custom_trait):
 			_show_toast("Не удалось сохранить настройки модели.", "error")
 			return
 		message = "Настройки «%s» сохранены." % persona_name

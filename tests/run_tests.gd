@@ -103,10 +103,19 @@ func _test_personas() -> void:
 	_check(PersonaStoreScript.describe(created) == "Дружелюбный · Коротко",
 		"персонажи: подпись темперамента (%s)" % PersonaStoreScript.describe(created))
 
+	# пользовательская строка темперамента (вместе с кнопками и сама по себе)
+	var only_custom: Dictionary = store.add("Капитан", "llama3.2:latest", [], "Говори как старый моряк")
+	var custom_prompt: String = PersonaStoreScript.build_system_prompt(only_custom)
+	_check(custom_prompt.contains("Твой темперамент:"), "персонажи: свой темперамент включает блок темперамента")
+	_check(custom_prompt.contains("— Говори как старый моряк"), "персонажи: свой темперамент в промпте")
+	_check(not custom_prompt.contains("Особых требований"), "персонажи: нейтральная заглушка убрана")
+	_check(PersonaStoreScript.describe(only_custom) == "Говори как старый моряк",
+		"персонажи: подпись из своего темперамента (%s)" % PersonaStoreScript.describe(only_custom))
+
 	_check(store.add("", "llama3.2", []).is_empty(), "персонажи: пустое имя не создаётся")
 	store.clear()
 
-	var first: Dictionary = store.add("Бородач", "llama3.2:latest", ["friendly", "brief"])
+	var first: Dictionary = store.add("Бородач", "llama3.2:latest", ["friendly", "brief"], "Шути про космос")
 	_check(store.save() == OK, "персонажи: сохранение прошло")
 	_check(FileAccess.file_exists(file), "персонажи: файл появился")
 
@@ -118,13 +127,19 @@ func _test_personas() -> void:
 	_check(str(restored.get("name", "")) == "Бородач", "персонажи: имя пережило запись")
 	_check(str(restored.get("base_model", "")) == "llama3.2:latest", "персонажи: основа пережила запись")
 	_check(restored.get("traits", []) == ["friendly", "brief"], "персонажи: темперамент пережил запись")
+	_check(str(restored.get("custom_trait", "")) == "Шути про космос",
+		"персонажи: свой темперамент пережил запись")
+	_check(PersonaStoreScript.describe(restored) == "Дружелюбный · Коротко · Шути про космос",
+		"персонажи: комбинированная подпись (%s)" % PersonaStoreScript.describe(restored))
 
 	_check(reloaded.update_persona(str(first.get("id", "")), "Старина", "qwen2.5-coder:7b",
-		["sarcastic"]), "персонажи: правка прошла")
+		["sarcastic"], "Ворчи добродушно"), "персонажи: правка прошла")
 	var edited: Dictionary = reloaded.get_by_id(str(first.get("id", "")))
 	_check(str(edited.get("name", "")) == "Старина", "персонажи: новое имя на месте")
 	_check(str(edited.get("base_model", "")) == "qwen2.5-coder:7b", "персонажи: новая основа на месте")
 	_check(edited.get("traits", []) == ["sarcastic"], "персонажи: темперамент заменён")
+	_check(str(edited.get("custom_trait", "")) == "Ворчи добродушно",
+		"персонажи: свой темперамент обновлён")
 	_check(not reloaded.update_persona("нет-такого", "Кто-то", "llama3.2"),
 		"персонажи: правка несуществующего — false")
 	_check(str(reloaded.find_by_name("старина").get("name", "")) == "Старина",
