@@ -109,7 +109,7 @@ static func build() -> Theme:
 
 	# --- вкладки сайдбара (Диалоги / Модели / Настройки)
 	t.set_type_variation("TabButton", "Button")
-	var tab_normal := _box(Color(0, 0, 0, 0), 8)
+	var tab_normal := _box(PANEL_ALT.darkened(0.22), 8, BORDER, 1)
 	tab_normal.content_margin_left = 6
 	tab_normal.content_margin_right = 6
 	tab_normal.content_margin_top = 6
@@ -127,7 +127,12 @@ static func build() -> Theme:
 	tab_pressed.content_margin_top = 6
 	tab_pressed.content_margin_bottom = 6
 	t.set_stylebox("pressed", "TabButton", tab_pressed)
-	t.set_stylebox("hover_pressed", "TabButton", _box(ACCENT.darkened(0.35), 8, ACCENT, 1))
+	var tab_hover_pressed := _box(ACCENT.darkened(0.35), 8, ACCENT, 1)
+	tab_hover_pressed.content_margin_left = 6
+	tab_hover_pressed.content_margin_right = 6
+	tab_hover_pressed.content_margin_top = 6
+	tab_hover_pressed.content_margin_bottom = 6
+	t.set_stylebox("hover_pressed", "TabButton", tab_hover_pressed)
 	t.set_stylebox("focus", "TabButton", StyleBoxEmpty.new())
 	t.set_color("font_color", "TabButton", DIM)
 	t.set_color("font_hover_color", "TabButton", TEXT)
