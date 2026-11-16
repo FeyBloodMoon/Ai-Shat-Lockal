@@ -83,9 +83,12 @@ func refresh(persona_list: Array, model_list: Array, latest_chat: Dictionary) ->
 		var model_name := str(model)
 		var button := Button.new()
 		button.text = model_name
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		button.clip_text = true
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.custom_minimum_size = Vector2(0, 36)
-		button.tooltip_text = "Обычный диалог без персонажа"
+		button.tooltip_text = "%s — обычный диалог без персонажа" % model_name
 		button.pressed.connect(func() -> void: model_chosen.emit(model_name))
 		_models_grid.add_child(button)
 		model_buttons[model_name] = button
@@ -113,6 +116,7 @@ func _build() -> void:
 	_scroll.add_child(margin)
 
 	_content = VBoxContainer.new()
+	_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content.add_theme_constant_override("separation", 10)
 	margin.add_child(_content)
 
@@ -144,6 +148,7 @@ func _build() -> void:
 	_content.add_child(_section("ИЛИ ПРОСТО МОДЕЛЬ"))
 	_models_grid = GridContainer.new()
 	_models_grid.columns = 2
+	_models_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_models_grid.add_theme_constant_override("h_separation", 6)
 	_models_grid.add_theme_constant_override("v_separation", 6)
 	_content.add_child(_models_grid)

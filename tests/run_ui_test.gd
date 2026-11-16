@@ -45,6 +45,8 @@ func _run() -> void:
 	_check(start.visible, "старт: экран выбора открыт")
 	_check(not ui.get_node("%ChatScroll").visible, "старт: переписка скрыта")
 	_check(start.model_buttons.size() == 2, "старт: модели в выборе (%d)" % start.model_buttons.size())
+	_check(start.model_buttons["llama3.2:latest"].size.x > 120.0,
+		"старт: кнопки моделей занимают ширину колонки (%.0f)" % start.model_buttons["llama3.2:latest"].size.x)
 	_check(start.persona_buttons.is_empty(), "старт: персонажей пока нет")
 	start.create_persona_btn.pressed.emit()
 	await process_frame
@@ -70,6 +72,11 @@ func _run() -> void:
 	_check(_page(ui, "ChatsPage").visible and not _page(ui, "ModelsPage").visible,
 		"вкладки: «Диалоги» открываются")
 	_check(tab_settings.size.x > 40.0, "вкладки: кнопки вкладок в layout (%.0f)" % tab_settings.size.x)
+	var sidebar_scroll: Control = _page(ui, "ChatsPage").get_parent().get_parent()
+	_check(sidebar_scroll.global_position.y >= tab_chats.global_position.y + tab_chats.size.y,
+		"вкладки: прокрутка расположена ниже вкладок (%.0f >= %.0f)" % [
+			sidebar_scroll.global_position.y, tab_chats.global_position.y + tab_chats.size.y
+		])
 	tab_models.button_pressed = true
 	await process_frame
 	_check(_page(ui, "ModelsPage").visible and not _page(ui, "ChatsPage").visible,
